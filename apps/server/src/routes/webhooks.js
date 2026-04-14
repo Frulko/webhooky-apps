@@ -1,67 +1,6 @@
-import { verifyHmac } from '../services/hmac.js'
-import { broadcast } from '../ws/bridge.js'
-
+// Authenticated webhook management routes — registered under /api prefix
 export default async function webhookRoutes(fastify) {
-  // POST /hook/:token — public webhook receiver
-  fastify.post('/hook/:token', {
-    config: { rawBody: true },
-  }, async (request, reply) => {
-    const { token } = request.params
-
-    const [endpoint] = await fastify.sql`
-      SELECT id, hmac_secret, hmac_header, active
-      FROM endpoints WHERE token = ${token}
-    `
-
-    if (!endpoint || !endpoint.active) {
-      return reply.code(404).send({ error: 'Endpoint not found' })
-    }
-
-    // HMAC verification
-    if (endpoint.hmacSecret) {
-      const sigHeader = request.headers[endpoint.hmacHeader?.toLowerCase()]
-      const rawBody = request.rawBody ?? Buffer.from(JSON.stringify(request.body))
-      const valid = verifyHmac(endpoint.hmacSecret, rawBody, sigHeader)
-      if (!valid) {
-        return reply.code(401).send({ error: 'Invalid signature' })
-      }
-    }
-
-    const bodyRaw = request.body
-    const bodyText = typeof bodyRaw === 'string' ? bodyRaw : JSON.stringify(bodyRaw)
-    const bodyParsed = typeof bodyRaw === 'object' ? bodyRaw : null
-    const sizeBytes = Buffer.byteLength(bodyText, 'utf8')
-
-    const [webhook] = await fastify.sql`
-      INSERT INTO webhooks (endpoint_id, method, headers, body, body_parsed, source_ip, size_bytes)
-      VALUES (
-        ${endpoint.id},
-        ${request.method},
-        ${JSON.stringify(request.headers)},
-        ${bodyText},
-        ${bodyParsed ? JSON.stringify(bodyParsed) : null},
-        ${request.ip},
-        ${sizeBytes}
-      )
-      RETURNING id, endpoint_id, method, source_ip, size_bytes, received_at
-    `
-
-    // Forward to connected WebSocket clients
-    const forwarded = broadcast(endpoint.id, {
-      type: 'webhook',
-      webhook: {
-        ...webhook,
-        headers: request.headers,
-        body: bodyParsed ?? bodyText,
-      },
-    })
-
-    fastify.log.info({ webhookId: webhook.id, forwarded }, 'Webhook received')
-
-    return reply.code(200).send({ received: true, id: webhook.id, forwarded })
-  })
-
-  // GET /webhooks — list webhooks (authenticated)
+  // GET /webhooks — list webhooks
   fastify.get('/webhooks', {
     preHandler: [fastify.authenticate],
     schema: {
@@ -79,7 +18,7 @@ export default async function webhookRoutes(fastify) {
     const { endpointId, clientId, limit = 50, offset = 0 } = request.query
     const userId = request.user.sub
 
-    const rows = await fastify.sql`
+    return fastify.sql`
       SELECT w.id, w.endpoint_id, w.method, w.source_ip, w.size_bytes, w.received_at,
              e.name as endpoint_name, e.token as endpoint_token,
              c.name as client_name
@@ -92,7 +31,6 @@ export default async function webhookRoutes(fastify) {
       ORDER BY w.received_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `
-    return rows
   })
 
   // GET /webhooks/:id — full detail

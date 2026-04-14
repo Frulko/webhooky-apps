@@ -1,12 +1,11 @@
 import { register, unregister } from '../ws/bridge.js'
 
+// WebSocket bridge — registered at root (no /api prefix)
 export default async function wsRoutes(fastify) {
-  // WS /ws/:token?key=<api_key>
   fastify.get('/ws/:token', { websocket: true }, async (socket, request) => {
     const { token } = request.params
     const apiKey = request.query.key
 
-    // Authenticate via api_key
     const [client] = await fastify.sql`
       SELECT c.id, c.user_id, c.active
       FROM clients c
@@ -19,7 +18,6 @@ export default async function wsRoutes(fastify) {
       return
     }
 
-    // Find endpoint
     const [endpoint] = await fastify.sql`
       SELECT e.id, e.active
       FROM endpoints e
@@ -33,7 +31,6 @@ export default async function wsRoutes(fastify) {
       return
     }
 
-    // Create session
     const [session] = await fastify.sql`
       INSERT INTO ws_sessions (endpoint_id, client_id, ip)
       VALUES (${endpoint.id}, ${client.id}, ${request.ip})
@@ -53,13 +50,10 @@ export default async function wsRoutes(fastify) {
     socket.on('message', (raw) => {
       try {
         const msg = JSON.parse(raw.toString())
-        // Heartbeat
         if (msg.type === 'ping') {
           socket.send(JSON.stringify({ type: 'pong' }))
         }
-      } catch {
-        // ignore malformed messages
-      }
+      } catch {}
     })
 
     socket.on('close', async () => {
@@ -69,21 +63,5 @@ export default async function wsRoutes(fastify) {
       `
       fastify.log.info({ sessionId: session.id }, 'WS client disconnected')
     })
-  })
-
-  // GET /connections — list active WS sessions (authenticated)
-  fastify.get('/connections', { preHandler: [fastify.authenticate] }, async (request) => {
-    const userId = request.user.sub
-    return fastify.sql`
-      SELECT ws.id, ws.endpoint_id, ws.client_id, ws.ip, ws.connected_at,
-             e.name as endpoint_name, e.token as endpoint_token,
-             c.name as client_name
-      FROM ws_sessions ws
-      JOIN endpoints e ON e.id = ws.endpoint_id
-      JOIN clients c ON c.id = ws.client_id
-      WHERE c.user_id = ${userId}
-        AND ws.disconnected_at IS NULL
-      ORDER BY ws.connected_at DESC
-    `
   })
 }

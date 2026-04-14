@@ -1,5 +1,5 @@
 {
-  "name": "@webhook-catcher/server",
+  "name": "@hooky/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",

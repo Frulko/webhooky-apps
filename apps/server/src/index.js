@@ -11,9 +11,11 @@ import dbPlugin from './plugins/db.js'
 import authPlugin from './plugins/auth.js'
 
 import authRoutes from './routes/auth.js'
+import hookRoutes from './routes/hook.js'
 import webhookRoutes from './routes/webhooks.js'
 import replayRoutes from './routes/replay.js'
 import wsRoutes from './routes/ws.js'
+import connectionsRoutes from './routes/connections.js'
 import adminUsersRoutes from './routes/admin/users.js'
 import clientsRoutes from './routes/users/clients.js'
 import endpointsRoutes from './routes/users/endpoints.js'
@@ -29,7 +31,6 @@ const fastify = Fastify({
   },
 })
 
-// Plugins
 await fastify.register(fastifyCors, {
   origin: process.env.CORS_ORIGIN || true,
   credentials: true,
@@ -54,35 +55,43 @@ fastify.addContentTypeParser('*', { parseAs: 'buffer' }, (req, body, done) => {
   done(null, body.toString())
 })
 
-// Routes
-await fastify.register(authRoutes)
-await fastify.register(webhookRoutes)
-await fastify.register(replayRoutes)
-await fastify.register(wsRoutes)
-await fastify.register(adminUsersRoutes)
-await fastify.register(clientsRoutes)
-await fastify.register(endpointsRoutes)
+// Public routes — no prefix
+await fastify.register(hookRoutes)   // POST /hook/:token
+await fastify.register(wsRoutes)     // WS  /ws/:token
+
+// Authenticated API routes — all under /api
+await fastify.register(authRoutes, { prefix: '/api' })
+await fastify.register(webhookRoutes, { prefix: '/api' })
+await fastify.register(replayRoutes, { prefix: '/api' })
+await fastify.register(connectionsRoutes, { prefix: '/api' })
+await fastify.register(adminUsersRoutes, { prefix: '/api' })
+await fastify.register(clientsRoutes, { prefix: '/api' })
+await fastify.register(endpointsRoutes, { prefix: '/api' })
+
+// Health check
+fastify.get('/api/health', async () => ({ status: 'ok', ts: new Date().toISOString() }))
 
 // Serve built frontend (production)
-const webDist = join(__dir, '../../web/dist')
+// In Docker: dist/ is at apps/server/dist (copied from web build)
+// In dev: dist/ is at apps/web/dist (after pnpm --filter web build)
+const webDist = existsSync(join(__dir, '../dist'))
+  ? join(__dir, '../dist')
+  : join(__dir, '../../web/dist')
 if (existsSync(webDist)) {
   await fastify.register(fastifyStatic, {
     root: webDist,
     prefix: '/',
-    decorateReply: false,
   })
 
+  // SPA fallback — serve index.html for all non-API, non-hook, non-ws routes
   fastify.setNotFoundHandler((req, reply) => {
-    if (!req.url.startsWith('/hook/') && !req.url.startsWith('/ws/') && !req.url.startsWith('/auth')) {
-      reply.sendFile('index.html')
-    } else {
-      reply.code(404).send({ error: 'Not found' })
+    const url = req.url.split('?')[0]
+    if (url.startsWith('/api/') || url.startsWith('/hook/') || url.startsWith('/ws/')) {
+      return reply.code(404).send({ error: 'Not found' })
     }
+    reply.sendFile('index.html')
   })
 }
-
-// Health check
-fastify.get('/health', async () => ({ status: 'ok', ts: new Date().toISOString() }))
 
 const host = process.env.HOST || '0.0.0.0'
 const port = Number(process.env.PORT) || 3000

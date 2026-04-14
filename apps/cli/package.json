@@ -1,19 +1,22 @@
 {
-  "name": "webhook-catcher",
-  "version": "0.1.0",
-  "description": "CLI to forward webhooks from webhook-catcher to your local server",
+  "name": "hooky",
+  "version": "0.2.0",
+  "description": "Forward webhooks to localhost — the hooky CLI",
   "type": "module",
   "bin": {
-    "webhook-catcher": "./bin/webhook-catcher.js"
+    "hooky": "./bin/webhook-catcher.js"
   },
-  "files": ["bin", "src"],
+  "files": [
+    "bin",
+    "src"
+  ],
   "scripts": {
     "dev": "node src/index.js"
   },
   "dependencies": {
-    "ws": "^8.18.0",
+    "@inquirer/prompts": "^8.4.1",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
-    "dotenv": "^16.4.5"
+    "ws": "^8.18.0"
   }
 }

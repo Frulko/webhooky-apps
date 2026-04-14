@@ -55,7 +55,7 @@ export default function Connections() {
                 <div>
                   <p className="text-sm font-medium">No active connections</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Run <code className="bg-muted px-1 rounded">npx webhook-catcher connect --token &lt;token&gt;</code> to connect
+                    Run <code className="bg-muted px-1 rounded">npx hooky connect --token &lt;token&gt;</code> to connect
                   </p>
                 </div>
               </div>

@@ -153,8 +153,20 @@ export default function Webhooks() {
     })
   }
 
-  const body = detail?.bodyParsed
-    ? JSON.stringify(detail.bodyParsed, null, 2)
+  const parsedHeaders = detail
+    ? typeof detail.headers === 'string'
+      ? JSON.parse(detail.headers)
+      : (detail.headers ?? {})
+    : {}
+
+  const rawBodyParsed = detail?.bodyParsed
+    ? typeof detail.bodyParsed === 'string'
+      ? JSON.parse(detail.bodyParsed)
+      : detail.bodyParsed
+    : null
+
+  const body = rawBodyParsed
+    ? JSON.stringify(rawBodyParsed, null, 2)
     : detail?.body ?? ''
 
   return (
@@ -255,10 +267,10 @@ export default function Webhooks() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {Object.entries(detail.headers ?? {}).map(([k, v]) => (
+                      {Object.entries(parsedHeaders).map(([k, v]) => (
                         <tr key={k} className="hover:bg-muted/40">
                           <td className="px-3 py-1.5 font-mono text-muted-foreground align-top whitespace-nowrap">{k}</td>
-                          <td className="px-3 py-1.5 font-mono break-all">{v}</td>
+                          <td className="px-3 py-1.5 font-mono break-all">{String(v)}</td>
                         </tr>
                       ))}
                     </tbody>

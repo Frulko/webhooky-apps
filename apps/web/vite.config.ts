@@ -15,7 +15,6 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
-        rewrite: (p) => p.replace(/^\/api/, ''),
       },
       '/hook': {
         target: 'http://localhost:3000',

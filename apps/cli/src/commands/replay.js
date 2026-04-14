@@ -1,7 +1,23 @@
 import chalk from 'chalk'
+import { load, merge } from '../config.js'
+import { authedFetch } from '../api.js'
 
-export async function replay(options) {
-  const { id, forward, key, server } = options
+export async function replay(flags) {
+  const cfg = load()
+  const opts = merge(cfg, flags)
+
+  const forward = flags.forward ?? opts.forward
+  const { id } = flags
+
+  if (!cfg?.auth?.token) {
+    console.error(chalk.red('\n  Not authenticated. Run `hooky login` or `hooky init`.\n'))
+    process.exit(1)
+  }
+
+  if (!forward) {
+    console.error(chalk.red('\n  Missing forward URL. Pass --forward or run `hooky init`.\n'))
+    process.exit(1)
+  }
 
   console.log(chalk.bold('\n  Replaying webhook'))
   console.log(chalk.dim('  ─────────────────────────────────────'))
@@ -9,26 +25,27 @@ export async function replay(options) {
   console.log(`  ${chalk.dim('Forwarding to:')} ${chalk.green(forward)}`)
   console.log(chalk.dim('  ─────────────────────────────────────\n'))
 
-  // Fetch the webhook from server
   let wh
   try {
-    const res = await fetch(`${server}/webhooks/${id}`, {
-      headers: {
-        'x-api-key': key,
-        authorization: `Bearer ${key}`,
-      },
-    })
-    if (!res.ok) {
-      throw new Error(`Server returned ${res.status}`)
-    }
+    const res = await authedFetch(cfg, `/webhooks/${id}`)
+    if (!res.ok) throw new Error(`Server returned ${res.status}`)
     wh = await res.json()
   } catch (err) {
     console.error(chalk.red(`  ✗ Failed to fetch webhook: ${err.message}`))
     process.exit(1)
   }
 
-  const body = wh.body_parsed ? JSON.stringify(wh.body_parsed) : wh.body
-  const contentType = wh.headers?.['content-type'] ?? 'application/json'
+  const parsedBody = typeof wh.bodyParsed === 'string'
+    ? JSON.parse(wh.bodyParsed)
+    : wh.bodyParsed
+
+  const body = parsedBody ? JSON.stringify(parsedBody) : wh.body
+
+  const parsedHeaders = typeof wh.headers === 'string'
+    ? JSON.parse(wh.headers)
+    : (wh.headers ?? {})
+
+  const contentType = parsedHeaders['content-type'] ?? 'application/json'
 
   try {
     const res = await fetch(forward, {
@@ -36,7 +53,7 @@ export async function replay(options) {
       headers: {
         'content-type': contentType,
         'x-webhook-id': wh.id,
-        'x-forwarded-by': 'webhook-catcher',
+        'x-forwarded-by': 'hooky',
         'x-webhook-replay': 'true',
       },
       body,
