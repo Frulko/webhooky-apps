@@ -1,15 +1,24 @@
 {
-  "name": "hooky",
+  "name": "webhooky",
   "version": "0.2.0",
-  "description": "Forward webhooks to localhost — the hooky CLI",
+  "description": "Forward webhooks to your localhost — CLI client for hooky",
   "type": "module",
   "bin": {
-    "hooky": "./bin/webhook-catcher.js"
+    "hooky": "./bin/hooky.js"
   },
   "files": [
     "bin",
     "src"
   ],
+  "keywords": [
+    "webhook",
+    "tunnel",
+    "localhost",
+    "forward",
+    "cli",
+    "devtools"
+  ],
+  "license": "MIT",
   "scripts": {
     "dev": "node src/index.js"
   },
