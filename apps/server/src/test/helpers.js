@@ -1,6 +1,6 @@
 import 'dotenv/config'
+import bcrypt from 'bcryptjs'
 import { buildApp } from '../app.js'
-import { migrate } from '../db/migrate.js'
 
 /**
  * Builds the app with logging disabled for tests.
@@ -13,14 +13,6 @@ export async function createApp() {
 }
 
 /**
- * Run migrations against the test database.
- * Called once before all test files run.
- */
-export async function runMigrations() {
-  await migrate()
-}
-
-/**
  * Insert a test user and return their credentials + JWT token.
  */
 export async function seedUser(app, {
@@ -28,7 +20,6 @@ export async function seedUser(app, {
   password = 'testpassword',
   role = 'user',
 } = {}) {
-  const bcrypt = await import('bcryptjs')
   const hash = await bcrypt.hash(password, 10)
 
   const [user] = await app.sql`
