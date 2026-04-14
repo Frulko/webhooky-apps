@@ -29,29 +29,29 @@ import { toast } from 'sonner'
 interface Webhook {
   id: string
   method: string
-  endpoint_id: string
-  endpoint_name: string
-  endpoint_token: string
-  client_name: string
-  source_ip: string
-  size_bytes: number
-  received_at: string
+  endpointId: string
+  endpointName: string
+  endpointToken: string
+  clientName: string
+  sourceIp: string
+  sizeBytes: number
+  receivedAt: string
 }
 
 interface WebhookDetail extends Webhook {
   headers: Record<string, string>
   body: string
-  body_parsed: Record<string, unknown> | null
+  bodyParsed: Record<string, unknown> | null
 }
 
 interface Replay {
   id: string
-  target_type: string
-  target_url: string | null
+  targetType: string
+  targetUrl: string | null
   status: string
-  response_code: number | null
-  error_msg: string | null
-  created_at: string
+  responseCode: number | null
+  errorMsg: string | null
+  createdAt: string
 }
 
 function MethodBadge({ method }: { method: string }) {
@@ -125,8 +125,8 @@ export default function Webhooks() {
     })
   }
 
-  const body = detail?.body_parsed
-    ? JSON.stringify(detail.body_parsed, null, 2)
+  const body = detail?.bodyParsed
+    ? JSON.stringify(detail.bodyParsed, null, 2)
     : detail?.body ?? ''
 
   return (
@@ -159,16 +159,16 @@ export default function Webhooks() {
               >
                 <MethodBadge method={wh.method} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{wh.endpoint_name}</p>
+                  <p className="text-sm font-medium truncate">{wh.endpointName}</p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {wh.client_name} · {wh.source_ip}
+                    {wh.clientName} · {wh.sourceIp}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-xs text-muted-foreground">
-                    {formatDistanceToNow(new Date(wh.received_at), { addSuffix: true })}
+                    {formatDistanceToNow(new Date(wh.receivedAt), { addSuffix: true })}
                   </p>
-                  <p className="text-xs text-muted-foreground">{(wh.size_bytes / 1024).toFixed(1)} KB</p>
+                  <p className="text-xs text-muted-foreground">{(wh.sizeBytes / 1024).toFixed(1)} KB</p>
                 </div>
                 <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
               </div>
@@ -183,7 +183,7 @@ export default function Webhooks() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {detail && <MethodBadge method={detail.method} />}
-              <span className="truncate">{detail?.endpoint_name}</span>
+              <span className="truncate">{detail?.endpointName}</span>
             </DialogTitle>
           </DialogHeader>
 
@@ -208,8 +208,8 @@ export default function Webhooks() {
                   </pre>
                 </ScrollArea>
                 <div className="mt-3 text-xs text-muted-foreground space-y-1">
-                  <p>Received: {format(new Date(detail.received_at), 'PPpp')}</p>
-                  <p>Source: {detail.source_ip} · {detail.size_bytes} bytes</p>
+                  <p>Received: {format(new Date(detail.receivedAt), 'PPpp')}</p>
+                  <p>Source: {detail.sourceIp} · {detail.sizeBytes} bytes</p>
                 </div>
               </TabsContent>
 
@@ -273,14 +273,14 @@ export default function Webhooks() {
                       <div key={r.id} className="border rounded-md p-3 text-sm space-y-1">
                         <div className="flex items-center gap-2">
                           <StatusBadge status={r.status} />
-                          <Badge variant="outline" className="text-xs">{r.target_type}</Badge>
-                          {r.response_code && <span className="text-xs text-muted-foreground">HTTP {r.response_code}</span>}
+                          <Badge variant="outline" className="text-xs">{r.targetType}</Badge>
+                          {r.responseCode && <span className="text-xs text-muted-foreground">HTTP {r.responseCode}</span>}
                           <span className="text-xs text-muted-foreground ml-auto">
-                            {formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}
+                            {formatDistanceToNow(new Date(r.createdAt), { addSuffix: true })}
                           </span>
                         </div>
-                        {r.target_url && <p className="text-xs text-muted-foreground truncate">{r.target_url}</p>}
-                        {r.error_msg && <p className="text-xs text-destructive">{r.error_msg}</p>}
+                        {r.targetUrl && <p className="text-xs text-muted-foreground truncate">{r.targetUrl}</p>}
+                        {r.errorMsg && <p className="text-xs text-destructive">{r.errorMsg}</p>}
                       </div>
                     ))}
                   </div>

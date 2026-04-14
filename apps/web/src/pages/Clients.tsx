@@ -33,20 +33,20 @@ interface Client {
   id: string
   name: string
   description: string | null
-  api_key: string
+  apiKey: string
   active: boolean
-  created_at: string
+  createdAt: string
 }
 
 interface Endpoint {
   id: string
-  client_id: string
+  clientId: string
   name: string
   token: string
-  hmac_header: string
-  has_hmac: boolean
+  hmacHeader: string
+  hasHmac: boolean
   active: boolean
-  created_at: string
+  createdAt: string
 }
 
 function CopyButton({ value }: { value: string }) {
@@ -69,7 +69,7 @@ function EndpointRow({ endpoint, onDelete }: { endpoint: Endpoint; onDelete: (id
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-medium truncate">{endpoint.name}</span>
           {!endpoint.active && <Badge variant="secondary" className="text-xs">disabled</Badge>}
-          {endpoint.has_hmac && <Badge variant="outline" className="text-xs">HMAC</Badge>}
+          {endpoint.hasHmac && <Badge variant="outline" className="text-xs">HMAC</Badge>}
         </div>
         <AlertDialog>
           <AlertDialogTrigger asChild>
@@ -250,11 +250,11 @@ function ClientCard({ client }: { client: Client }) {
         {/* API Key */}
         <div className="flex items-center gap-1 mt-2">
           <div className="flex items-center gap-1 text-xs font-mono text-muted-foreground bg-muted rounded px-2 py-1 flex-1 min-w-0">
-            <span className="truncate">{showKey ? client.api_key : '•'.repeat(20)}</span>
+            <span className="truncate">{showKey ? client.apiKey : '•'.repeat(20)}</span>
             <Button variant="ghost" size="icon" className="h-5 w-5 shrink-0" onClick={() => setShowKey(!showKey)}>
               {showKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
             </Button>
-            <CopyButton value={client.api_key} />
+            <CopyButton value={client.apiKey} />
           </div>
           <Button
             variant="ghost"

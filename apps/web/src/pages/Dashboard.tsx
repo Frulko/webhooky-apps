@@ -86,22 +86,22 @@ export default function Dashboard() {
             {webhooks?.map((wh: {
               id: string
               method: string
-              endpoint_name: string
-              client_name: string
-              source_ip: string
-              size_bytes: number
-              received_at: string
+              endpointName: string
+              clientName: string
+              sourceIp: string
+              sizeBytes: number
+              receivedAt: string
             }) => (
               <div key={wh.id} className="flex items-center justify-between text-sm border rounded-md px-3 py-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <Badge variant="outline" className="text-xs shrink-0">{wh.method}</Badge>
                   <div className="min-w-0">
-                    <p className="font-medium truncate">{wh.endpoint_name}</p>
-                    <p className="text-muted-foreground text-xs truncate">{wh.client_name}</p>
+                    <p className="font-medium truncate">{wh.endpointName}</p>
+                    <p className="text-muted-foreground text-xs truncate">{wh.clientName}</p>
                   </div>
                 </div>
                 <span className="text-xs text-muted-foreground shrink-0 ml-2">
-                  {formatDistanceToNow(new Date(wh.received_at), { addSuffix: true })}
+                  {formatDistanceToNow(new Date(wh.receivedAt), { addSuffix: true })}
                 </span>
               </div>
             ))}
@@ -125,16 +125,16 @@ export default function Dashboard() {
             )}
             {connections?.map((conn: {
               id: string
-              endpoint_name: string
-              client_name: string
-              endpoint_token: string
+              endpointName: string
+              clientName: string
+              endpointToken: string
               ip: string
-              connected_at: string
+              connectedAt: string
             }) => (
               <div key={conn.id} className="flex items-center justify-between text-sm border rounded-md px-3 py-2">
                 <div className="min-w-0">
-                  <p className="font-medium truncate">{conn.endpoint_name}</p>
-                  <p className="text-muted-foreground text-xs truncate">{conn.client_name} · {conn.ip}</p>
+                  <p className="font-medium truncate">{conn.endpointName}</p>
+                  <p className="text-muted-foreground text-xs truncate">{conn.clientName} · {conn.ip}</p>
                 </div>
                 <Badge variant="secondary" className="text-xs shrink-0 ml-2 bg-green-500/10 text-green-600">
                   live

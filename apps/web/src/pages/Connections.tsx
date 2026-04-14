@@ -8,13 +8,13 @@ import { formatDistanceToNow } from 'date-fns'
 
 interface Connection {
   id: string
-  endpoint_id: string
-  endpoint_name: string
-  endpoint_token: string
-  client_id: string
-  client_name: string
+  endpointId: string
+  endpointName: string
+  endpointToken: string
+  clientId: string
+  clientName: string
   ip: string
-  connected_at: string
+  connectedAt: string
 }
 
 export default function Connections() {
@@ -66,18 +66,18 @@ export default function Connections() {
                 <div className="h-2 w-2 rounded-full bg-green-500 shrink-0 animate-pulse" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate">{conn.endpoint_name}</span>
+                    <span className="text-sm font-medium truncate">{conn.endpointName}</span>
                     <code className="text-xs text-muted-foreground bg-muted px-1 rounded shrink-0">
-                      {conn.endpoint_token.slice(0, 8)}…
+                      {conn.endpointToken.slice(0, 8)}…
                     </code>
                   </div>
                   <p className="text-xs text-muted-foreground truncate">
-                    {conn.client_name} · {conn.ip}
+                    {conn.clientName} · {conn.ip}
                   </p>
                 </div>
                 <div className="text-xs text-muted-foreground shrink-0 text-right">
                   <p>connected</p>
-                  <p>{formatDistanceToNow(new Date(conn.connected_at), { addSuffix: true })}</p>
+                  <p>{formatDistanceToNow(new Date(conn.connectedAt), { addSuffix: true })}</p>
                 </div>
               </div>
             ))}

@@ -43,7 +43,7 @@ interface User {
   email: string
   role: 'admin' | 'user'
   active: boolean
-  created_at: string
+  createdAt: string
 }
 
 export default function AdminUsers() {
@@ -162,7 +162,7 @@ export default function AdminUsers() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Joined {format(new Date(user.created_at), 'PP')}
+                    Joined {format(new Date(user.createdAt), 'PP')}
                   </p>
                 </div>
 
