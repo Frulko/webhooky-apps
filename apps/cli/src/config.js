@@ -12,8 +12,8 @@ import { homedir, platform } from 'node:os'
 import { join, dirname } from 'node:path'
 
 function configPath() {
-  if (process.env.WEBHOOK_CATCHER_CONFIG) {
-    return process.env.WEBHOOK_CATCHER_CONFIG
+  if (process.env.HOOKY_CONFIG) {
+    return process.env.HOOKY_CONFIG
   }
   const home = homedir()
   const plat = platform()
