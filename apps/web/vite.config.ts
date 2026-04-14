@@ -17,6 +17,9 @@ export default defineConfig({
         target: 'http://localhost:3000',
         rewrite: (p) => p.replace(/^\/api/, ''),
       },
+      '/hook': {
+        target: 'http://localhost:3000',
+      },
       '/ws': {
         target: 'ws://localhost:3000',
         ws: true,
