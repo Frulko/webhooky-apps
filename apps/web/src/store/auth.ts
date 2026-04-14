@@ -19,7 +19,7 @@ interface AuthState {
 export const useAuth = create<AuthState>((set) => ({
   user: null,
   token: localStorage.getItem('token'),
-  isLoading: false,
+  isLoading: !!localStorage.getItem('token'), // true if we have a token to verify
 
   login: async (email, password) => {
     set({ isLoading: true })
@@ -36,11 +36,12 @@ export const useAuth = create<AuthState>((set) => ({
   },
 
   fetchMe: async () => {
+    set({ isLoading: true })
     try {
       const res = await api.get('/auth/me')
-      set({ user: res.data })
+      set({ user: res.data, isLoading: false })
     } catch {
-      set({ user: null, token: null })
+      set({ user: null, token: null, isLoading: false })
       localStorage.removeItem('token')
       localStorage.removeItem('refreshToken')
     }

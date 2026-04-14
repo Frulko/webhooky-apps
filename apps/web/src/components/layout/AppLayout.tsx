@@ -45,10 +45,11 @@ const navAdmin = [
 ]
 
 export default function AppLayout() {
-  const { user, logout } = useAuth()
+  const { user, isLoading, logout } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
 
+  if (isLoading) return null
   if (!user) return <Navigate to="/login" replace />
 
   function handleLogout() {
