@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import fastifyCors from '@fastify/cors'
 import fastifyWebsocket from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
+import fastifyRateLimit from '@fastify/rate-limit'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
@@ -15,10 +16,17 @@ import hookRoutes from './routes/hook.js'
 import webhookRoutes from './routes/webhooks.js'
 import replayRoutes from './routes/replay.js'
 import wsRoutes from './routes/ws.js'
+import wsTokenRoutes from './routes/ws-token.js'
 import connectionsRoutes from './routes/connections.js'
 import adminUsersRoutes from './routes/admin/users.js'
 import clientsRoutes from './routes/users/clients.js'
 import endpointsRoutes from './routes/users/endpoints.js'
+
+// Fail fast in production if JWT_SECRET is not set
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is required in production')
+  process.exit(1)
+}
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 
@@ -29,11 +37,19 @@ const fastify = Fastify({
       ? { target: 'pino-pretty' }
       : undefined,
   },
+  // Explicit body size limit: 512 KB for API, overridden per-route for webhooks
+  bodyLimit: 524_288,
 })
 
 await fastify.register(fastifyCors, {
   origin: process.env.CORS_ORIGIN || true,
   credentials: true,
+})
+
+await fastify.register(fastifyRateLimit, {
+  global: false, // opt-in per route
+  redis: undefined,
+  errorResponseBuilder: () => ({ error: 'Too many requests, please try again later.' }),
 })
 
 await fastify.register(fastifyWebsocket)
@@ -64,6 +80,7 @@ await fastify.register(authRoutes, { prefix: '/api' })
 await fastify.register(webhookRoutes, { prefix: '/api' })
 await fastify.register(replayRoutes, { prefix: '/api' })
 await fastify.register(connectionsRoutes, { prefix: '/api' })
+await fastify.register(wsTokenRoutes, { prefix: '/api' })
 await fastify.register(adminUsersRoutes, { prefix: '/api' })
 await fastify.register(clientsRoutes, { prefix: '/api' })
 await fastify.register(endpointsRoutes, { prefix: '/api' })

@@ -54,6 +54,15 @@ export async function listEndpoints(server, token, clientId) {
   return res.json()
 }
 
+export async function requestConnectToken(cfg, endpointToken, apiKey) {
+  const res = await authedFetch(cfg, '/api/ws-token', {
+    method: 'POST',
+    body: JSON.stringify({ endpointToken, apiKey }),
+  })
+  if (!res.ok) throw new Error('Failed to get connect token — check credentials')
+  return (await res.json()).connectToken
+}
+
 // Auto-refreshes JWT when <60s remain, persists new token to config.
 export async function authedFetch(cfg, path, init = {}) {
   let token = cfg.auth?.token

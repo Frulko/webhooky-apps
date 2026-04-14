@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(pnpm create:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm dlx:*)",
+      "Bash(pnpm tsc:*)",
+      "Bash(pnpm build:*)",
+      "Bash(rm -rf /Users/mowmow/Lab/webhook-catcher/apps/web/.git)",
+      "Bash(git rm:*)",
+      "Bash(chmod +x /Users/mowmow/Lab/webhook-catcher/apps/cli/bin/webhook-catcher.js)",
+      "Bash(node --input-type=module)",
+      "Bash(2>&1)",
+      "Bash(node --check /Users/mowmow/Lab/webhook-catcher/apps/server/src/index.js)",
+      "Bash(pnpm --filter @webhook-catcher/web build)",
+      "Bash(pnpm --filter web build)",
+      "Bash(pnpm --filter webhook-catcher add @inquirer/prompts)",
+      "Bash(node src/index.js connect --help)",
+      "Bash(node apps/cli/src/index.js --help)",
+      "Bash(WEBHOOK_CATCHER_CONFIG=/tmp/wc-test-absent.json node:*)",
+      "Bash(node:*)",
+      "Bash(curl -s http://localhost:3000/api/health)",
+      "Bash(kill %1)",
+      "Bash(xargs sed:*)",
+      "Bash(npm view:*)",
+      "Bash(chmod +x /Users/mowmow/Lab/webhook-catcher/apps/cli/bin/hooky.js)",
+      "Bash(pnpm:*)"
+    ]
+  }
+}

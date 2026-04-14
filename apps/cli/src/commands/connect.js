@@ -2,7 +2,7 @@ import WebSocket from 'ws'
 import chalk from 'chalk'
 import { confirm } from '@inquirer/prompts'
 import { load, save, merge } from '../config.js'
-import { listClients, listEndpoints } from '../api.js'
+import { listClients, listEndpoints, requestConnectToken } from '../api.js'
 import { select, input } from '@inquirer/prompts'
 
 async function pickEndpoint(cfg) {
@@ -146,8 +146,7 @@ export async function connect(flags) {
     process.exit(1)
   }
 
-  const wsUrl = server.replace(/^http/, 'ws').replace(/\/$/, '')
-  const fullUrl = `${wsUrl}/ws/${token}?key=${key}`
+  const wsBase = server.replace(/^http/, 'ws').replace(/\/$/, '')
 
   console.log(chalk.bold('\n  hooky'))
   console.log(chalk.dim('  ─────────────────────────────────────'))
@@ -160,7 +159,16 @@ export async function connect(flags) {
   let reconnectDelay = 1000
   let pingInterval
 
-  function doConnect() {
+  async function doConnect() {
+    let connectToken
+    try {
+      connectToken = await requestConnectToken(cfg, token, key)
+    } catch (err) {
+      console.error(chalk.red(`  ✗ ${err.message}`))
+      process.exit(1)
+    }
+
+    const fullUrl = `${wsBase}/ws/${token}?t=${connectToken}`
     ws = new WebSocket(fullUrl)
 
     ws.on('open', () => {
@@ -220,7 +228,10 @@ export async function connect(flags) {
       console.log(chalk.dim(`  ↻ Disconnected. Reconnecting in ${reconnectDelay / 1000}s…`))
       setTimeout(() => {
         reconnectDelay = Math.min(reconnectDelay * 2, 30000)
-        doConnect()
+        doConnect().catch((err) => {
+          console.error(chalk.red(`  ✗ Reconnect failed: ${err.message}`))
+          process.exit(1)
+        })
       }, reconnectDelay)
     })
 
@@ -229,7 +240,10 @@ export async function connect(flags) {
     })
   }
 
-  doConnect()
+  doConnect().catch((err) => {
+    console.error(chalk.red(`  ✗ ${err.message}`))
+    process.exit(1)
+  })
 
   process.on('SIGINT', () => {
     console.log(chalk.dim('\n  Disconnecting…'))

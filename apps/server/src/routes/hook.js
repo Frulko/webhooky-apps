@@ -4,7 +4,11 @@ import { broadcast } from '../ws/bridge.js'
 // Public webhook receiver — no /api prefix, registered at root
 export default async function hookRoutes(fastify) {
   fastify.post('/hook/:token', {
-    config: { rawBody: true },
+    config: {
+      rawBody: true,
+      rateLimit: { max: 120, timeWindow: '1 minute' },
+    },
+    bodyLimit: 1_048_576, // 1 MB max per webhook
   }, async (request, reply) => {
     const { token } = request.params
 

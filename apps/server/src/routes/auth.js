@@ -3,6 +3,9 @@ import bcrypt from 'bcryptjs'
 export default async function authRoutes(fastify) {
   // POST /auth/login
   fastify.post('/auth/login', {
+    config: {
+      rateLimit: { max: 10, timeWindow: '1 minute' },
+    },
     schema: {
       body: {
         type: 'object',
