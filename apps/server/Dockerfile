@@ -19,7 +19,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/server/package.json ./apps/server/package.json
 COPY apps/web/package.json ./apps/web/package.json
 COPY apps/cli/package.json ./apps/cli/package.json
-RUN pnpm install --frozen-lockfile --filter @webhook-catcher/server
+RUN pnpm install --frozen-lockfile --filter @hooky/server
 
 WORKDIR /app/apps/server
 COPY apps/server/src ./src
