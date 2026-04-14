@@ -54,6 +54,34 @@ interface Replay {
   createdAt: string
 }
 
+function JsonHighlight({ value }: { value: string }) {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    return <>{value}</>
+  }
+
+  const highlighted = JSON.stringify(parsed, null, 2).replace(
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    (match) => {
+      let cls = 'text-sky-600 dark:text-sky-400' // number
+      if (/^"/.test(match)) {
+        cls = /:$/.test(match)
+          ? 'text-violet-600 dark:text-violet-400 font-medium' // key
+          : 'text-green-700 dark:text-green-400' // string value
+      } else if (/true|false/.test(match)) {
+        cls = 'text-amber-600 dark:text-amber-400'
+      } else if (/null/.test(match)) {
+        cls = 'text-rose-500 dark:text-rose-400'
+      }
+      return `<span class="${cls}">${match}</span>`
+    }
+  )
+
+  return <span dangerouslySetInnerHTML={{ __html: highlighted }} />
+}
+
 function MethodBadge({ method }: { method: string }) {
   const colors: Record<string, string> = {
     POST: 'bg-blue-500/10 text-blue-600',
@@ -202,27 +230,39 @@ export default function Webhooks() {
               </TabsList>
 
               <TabsContent value="body" className="flex-1 min-h-0">
-                <ScrollArea className="h-64 w-full border rounded-md">
-                  <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-all">
-                    {body || <span className="text-muted-foreground italic">empty body</span>}
-                  </pre>
+                <ScrollArea className="h-64 w-full border rounded-md bg-muted/30">
+                  {body ? (
+                    <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-all leading-relaxed">
+                      <JsonHighlight value={body} />
+                    </pre>
+                  ) : (
+                    <p className="p-4 text-xs text-muted-foreground italic">empty body</p>
+                  )}
                 </ScrollArea>
-                <div className="mt-3 text-xs text-muted-foreground space-y-1">
-                  <p>Received: {format(new Date(detail.receivedAt), 'PPpp')}</p>
-                  <p>Source: {detail.sourceIp} · {detail.sizeBytes} bytes</p>
+                <div className="mt-3 flex gap-4 text-xs text-muted-foreground">
+                  <span>Received: {format(new Date(detail.receivedAt), 'PPpp')}</span>
+                  <span className="ml-auto">{detail.sourceIp} · {detail.sizeBytes} B</span>
                 </div>
               </TabsContent>
 
               <TabsContent value="headers" className="flex-1 min-h-0">
                 <ScrollArea className="h-64 w-full border rounded-md">
-                  <div className="p-4 space-y-1">
-                    {Object.entries(detail.headers ?? {}).map(([k, v]) => (
-                      <div key={k} className="flex gap-2 text-xs font-mono">
-                        <span className="text-muted-foreground shrink-0">{k}:</span>
-                        <span className="break-all">{v}</span>
-                      </div>
-                    ))}
-                  </div>
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                      <tr>
+                        <th className="text-left font-medium text-muted-foreground px-3 py-2 w-2/5">Header</th>
+                        <th className="text-left font-medium text-muted-foreground px-3 py-2">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {Object.entries(detail.headers ?? {}).map(([k, v]) => (
+                        <tr key={k} className="hover:bg-muted/40">
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground align-top whitespace-nowrap">{k}</td>
+                          <td className="px-3 py-1.5 font-mono break-all">{v}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </ScrollArea>
               </TabsContent>
 
