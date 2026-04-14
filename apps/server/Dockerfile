@@ -3,10 +3,12 @@ RUN npm install -g pnpm
 
 WORKDIR /app
 
-COPY package.json ./
+# Copy lockfile from monorepo root + app manifest
+COPY pnpm-lock.yaml ./
+COPY apps/server/package.json ./package.json
 RUN pnpm install --frozen-lockfile
 
-COPY src ./src
+COPY apps/server/src ./src
 
 EXPOSE 3000
 

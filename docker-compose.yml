@@ -20,8 +20,8 @@ services:
 
   server:
     build:
-      context: ./apps/server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/server/Dockerfile
     restart: unless-stopped
     ports:
       - '3000:3000'
