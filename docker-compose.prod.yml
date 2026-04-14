@@ -1,0 +1,48 @@
+version: '3.9'
+
+# Production compose — uses pre-built image from ghcr.io instead of local build.
+# Set GHCR_IMAGE to your full image path, e.g.:
+#   GHCR_IMAGE=ghcr.io/yourname/webhook-catcher:latest
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: webhook
+      POSTGRES_PASSWORD: webhook
+      POSTGRES_DB: webhook_catcher
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U webhook -d webhook_catcher']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  server:
+    image: ${GHCR_IMAGE:-ghcr.io/yourname/webhook-catcher:latest}
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://webhook:webhook@postgres:5432/webhook_catcher
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    driver: bridge

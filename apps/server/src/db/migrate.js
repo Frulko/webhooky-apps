@@ -7,7 +7,7 @@ import sql from './index.js'
 const __dir = dirname(fileURLToPath(import.meta.url))
 const migrationsDir = join(__dir, 'migrations')
 
-async function migrate() {
+export async function migrate() {
   await sql`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version TEXT PRIMARY KEY,
@@ -38,7 +38,10 @@ async function migrate() {
   await sql.end()
 }
 
-migrate().catch((err) => {
-  console.error('Migration failed:', err)
-  process.exit(1)
-})
+// Run directly (node migrate.js)
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  migrate().catch((err) => {
+    console.error('Migration failed:', err)
+    process.exit(1)
+  })
+}
