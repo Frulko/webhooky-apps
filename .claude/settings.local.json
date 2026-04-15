@@ -29,7 +29,13 @@
       "Bash(xargs sed:*)",
       "Bash(npm view:*)",
       "Bash(chmod +x /Users/mowmow/Lab/webhook-catcher/apps/cli/bin/hooky.js)",
-      "Bash(pnpm:*)"
+      "Bash(pnpm:*)",
+      "Bash(git push:*)",
+      "Bash(git tag:*)",
+      "Bash(grep -h \"process\\\\.env\\\\.\" /Users/mowmow/Lab/webhook-catcher/apps/server/src/**/*.js)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(chmod +x /Users/mowmow/Lab/webhook-catcher/scripts/release)"
     ]
   }
 }
