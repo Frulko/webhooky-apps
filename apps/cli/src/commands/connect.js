@@ -4,8 +4,12 @@ import { confirm } from '@inquirer/prompts'
 import { load, save, merge } from '../config.js'
 import { listClients, listEndpoints, requestConnectToken, listMissedWebhooks } from '../api.js'
 import { select, input } from '@inquirer/prompts'
+import { Agent } from 'undici'
 
 const MAX_RECONNECTS = 10
+
+// Ignore TLS errors for forward targets (self-signed certs, Valet .test, etc.)
+const insecureDispatcher = new Agent({ connect: { rejectUnauthorized: false } })
 
 const HOP_BY_HOP = new Set([
   'host', 'connection', 'keep-alive', 'transfer-encoding',
@@ -44,6 +48,7 @@ async function forwardWebhook(wh, forward, tag = '') {
       headers: forwardHeaders,
       body: hasBody ? body : undefined,
       signal: AbortSignal.timeout(10000),
+      dispatcher: insecureDispatcher,
     })
 
     const color = res.ok ? chalk.green : chalk.red
