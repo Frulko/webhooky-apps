@@ -158,13 +158,23 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     exit 1
 fi
 
+# ── Bump package.json ────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLI_PKG="$SCRIPT_DIR/../apps/cli/package.json"
+
+echo "Mise à jour de apps/cli/package.json → $NEW_VERSION..."
+npm version --no-git-tag-version "$NEW_VERSION" --prefix "$(dirname "$CLI_PKG")" > /dev/null
+git add "$CLI_PKG"
+git commit -m "chore(release): bump cli version to $NEW_VERSION"
+
 # ── Tag + push ───────────────────────────────────────────────────────────────
 echo "Création du tag $NEW_TAG..."
 git tag "$NEW_TAG"
 
-echo "Push du tag..."
-if ! git push --tags; then
-    echo "Erreur: push du tag échoué — rollback."
+echo "Push..."
+if ! git push origin "$MAIN_BRANCH" --tags; then
+    echo "Erreur: push échoué — rollback."
+    git reset --hard HEAD~1
     git tag -d "$NEW_TAG" 2>/dev/null || true
     exit 1
 fi
