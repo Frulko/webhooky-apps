@@ -12,6 +12,7 @@ import Webhooks from '@/pages/Webhooks'
 import Clients from '@/pages/Clients'
 import Connections from '@/pages/Connections'
 import AdminUsers from '@/pages/AdminUsers'
+import SetupCli from '@/pages/SetupCli'
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -48,6 +49,7 @@ export default function App() {
                 <Route path="/clients" element={<Clients />} />
                 <Route path="/connections" element={<Connections />} />
                 <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/setup-cli" element={<SetupCli />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

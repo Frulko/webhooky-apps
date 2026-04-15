@@ -29,6 +29,7 @@ import {
   Users,
   LogOut,
   ChevronUp,
+  Terminal,
 } from 'lucide-react'
 import { useAuth } from '@/store/auth'
 import { useNavigate } from 'react-router-dom'
@@ -38,6 +39,7 @@ const navMain = [
   { title: 'Webhooks', url: '/webhooks', icon: Webhook },
   { title: 'Clients', url: '/clients', icon: Plug2 },
   { title: 'Connections', url: '/connections', icon: MonitorPlay },
+  { title: 'Setup CLI', url: '/setup-cli', icon: Terminal },
 ]
 
 const navAdmin = [
