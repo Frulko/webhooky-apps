@@ -72,9 +72,8 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
   )
 }
 
-function EndpointRow({ endpoint, clientId, onDelete }: {
+function EndpointRow({ endpoint, onDelete }: {
   endpoint: Endpoint
-  clientId: string
   onDelete: (id: string) => void
 }) {
   const webhookUrl = `${window.location.origin}/hook/${endpoint.token}`
@@ -376,7 +375,6 @@ function ClientCard({ client }: { client: Client }) {
           <EndpointRow
             key={ep.id}
             endpoint={ep}
-            clientId={client.id}
             onDelete={(id) => deleteEndpoint.mutate(id)}
           />
         ))}
