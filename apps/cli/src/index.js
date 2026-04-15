@@ -3,9 +3,16 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import chalk from 'chalk'
+import { latestVersion } from './commands/update.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 const pkg = JSON.parse(readFileSync(join(__dir, '../package.json'), 'utf8'))
+
+// ── Non-blocking update check ────────────────────────────────────────────────
+// Fire and forget — prints a notice after the command if a newer version exists.
+// Skip for `update` command itself to avoid duplicate output.
+const isUpdateCmd = process.argv[2] === 'update'
+const updateCheck = isUpdateCmd ? null : latestVersion()
 
 program
   .name('hooky')
@@ -33,6 +40,7 @@ const { init } = await import('./commands/init.js')
 const { login } = await import('./commands/login.js')
 const { logout } = await import('./commands/logout.js')
 const { status } = await import('./commands/status.js')
+const { update } = await import('./commands/update.js')
 
 program
   .command('init')
@@ -81,9 +89,27 @@ program
   .option('-s, --server <url>',   'Server URL (overrides config)')
   .action(replay)
 
+program
+  .command('update')
+  .description('Update hooky to the latest version')
+  .action(update)
+
 // Show help when no command given
 if (process.argv.length === 2) {
   program.help()
 }
 
-program.parse()
+program.parseAsync().then(async () => {
+  if (!updateCheck) return
+  const latest = await updateCheck
+  if (latest && latest !== pkg.version) {
+    console.log()
+    console.log(
+      `  ${chalk.dim('Update available')} ${chalk.dim(pkg.version)} → ${chalk.green(latest)}`
+    )
+    console.log(
+      `  ${chalk.dim('Run')} ${chalk.cyan('hooky update')} ${chalk.dim('or')} ${chalk.cyan(`npx webhooky@${latest}`)}`
+    )
+    console.log()
+  }
+})
