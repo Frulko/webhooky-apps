@@ -6,7 +6,7 @@
 set -e
 
 MAIN_BRANCH="main"
-BUMP="patch"
+BUMP=""
 MANUAL_VERSION=""
 DRY_RUN=false
 
@@ -20,7 +20,7 @@ while [[ $# -gt 0 ]]; do
             echo "(tests → npm publish → Docker Hub → Portainer)."
             echo ""
             echo "Options:"
-            echo "  --patch              Bump patch : v0.8.0 → v0.8.1  (défaut)"
+            echo "  --patch              Bump patch : v0.8.0 → v0.8.1"
             echo "  --minor              Bump minor : v0.8.0 → v0.9.0"
             echo "  --major              Bump major : v0.8.0 → v1.0.0"
             echo "  --version X.Y.Z      Version manuelle exacte"
@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help           Affiche cette aide"
             echo ""
             echo "Exemples:"
-            echo "  ./scripts/release                    # v0.8.0 → v0.8.1"
+            echo "  ./scripts/release                    # prompt interactif"
             echo "  ./scripts/release --minor            # v0.8.0 → v0.9.0"
             echo "  ./scripts/release --major            # v0.8.0 → v1.0.0"
             echo "  ./scripts/release --version 1.0.0   # force v1.0.0"
@@ -90,6 +90,28 @@ CURRENT_VERSION="${LAST_TAG#v}"
 MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
 MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
 PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+
+# ── Choix interactif si aucun flag passé ─────────────────────────────────────
+if [ -z "$MANUAL_VERSION" ] && [ -z "$BUMP" ]; then
+    V_PATCH="${MAJOR}.${MINOR}.$((PATCH + 1))"
+    V_MINOR="${MAJOR}.$((MINOR + 1)).0"
+    V_MAJOR="$((MAJOR + 1)).0.0"
+    echo ""
+    echo "  Version actuelle : $LAST_TAG"
+    echo ""
+    echo "  1) patch  →  v${V_PATCH}"
+    echo "  2) minor  →  v${V_MINOR}"
+    echo "  3) major  →  v${V_MAJOR}"
+    echo ""
+    printf "  Choix [1/2/3] : "
+    read -r CHOICE
+    case "$CHOICE" in
+        1) BUMP="patch" ;;
+        2) BUMP="minor" ;;
+        3) BUMP="major" ;;
+        *) echo "Choix invalide."; exit 1 ;;
+    esac
+fi
 
 # ── Calcul de la nouvelle version ────────────────────────────────────────────
 if [ -n "$MANUAL_VERSION" ]; then
