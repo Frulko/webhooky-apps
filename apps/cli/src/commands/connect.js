@@ -59,10 +59,12 @@ function dbg(...args) {
   console.log(chalk.dim('  [debug]'), ...args)
 }
 
+// Returns the curl string so the caller can offer clipboard copy on demand.
 async function forwardWebhook(wh, forward, tag = '', opts = {}) {
   const ts = new Date().toLocaleTimeString()
   console.log(`  ${chalk.dim(ts)} ${chalk.blue(wh.method ?? 'POST')}${tag} ${chalk.dim('→')} ${forward}`)
 
+  const curl = buildCurl(wh, forward)
   const startMs = Date.now()
 
   try {
@@ -117,12 +119,6 @@ async function forwardWebhook(wh, forward, tag = '', opts = {}) {
     const color = res.ok ? chalk.green : chalk.red
     console.log(`          ${color(`→ ${res.status} ${res.statusText}`)} ${chalk.dim(`${durationMs}ms`)}`)
 
-    if (opts.cfg?.copyCurl) {
-      const curl = buildCurl(wh, forward)
-      const ok = copyToClipboard(curl)
-      if (ok) console.log(`          ${chalk.dim('📋 curl copied to clipboard')}`)
-    }
-
     if (opts.cfg?.reportDeliveries && wh.id) {
       reportDelivery(opts.cfg, wh.id, {
         sessionId: opts.sessionId ?? null,
@@ -152,12 +148,6 @@ async function forwardWebhook(wh, forward, tag = '', opts = {}) {
       dbg('stack:', err.stack)
     }
 
-    if (opts.cfg?.copyCurl) {
-      const curl = buildCurl(wh, forward)
-      const ok = copyToClipboard(curl)
-      if (ok) console.log(`          ${chalk.dim('📋 curl copied to clipboard')}`)
-    }
-
     if (opts.cfg?.reportDeliveries && wh.id) {
       reportDelivery(opts.cfg, wh.id, {
         sessionId: opts.sessionId ?? null,
@@ -166,39 +156,27 @@ async function forwardWebhook(wh, forward, tag = '', opts = {}) {
       })
     }
   }
+
+  return curl
 }
 
-// Ask once (when keys are missing from config) then persist the answers.
+// Ask once (when key is missing from config) then persist the answer.
 async function askFirstRunOptions(cfg) {
   const needsReport = cfg?.reportDeliveries === undefined
-  const needsCurl   = cfg?.copyCurl === undefined
-  if (!needsReport && !needsCurl) return cfg
+  if (!needsReport) return cfg
 
   console.log(chalk.dim('\n  ─────────────────────────────────────'))
-  console.log(`  ${chalk.bold('First-time options')} ${chalk.dim('(saved to config, ask once)')}`)
+  console.log(`  ${chalk.bold('First-time option')} ${chalk.dim('(saved to config, asked once)')}`)
 
-  let reportDeliveries = cfg?.reportDeliveries ?? false
-  let copyCurl         = cfg?.copyCurl ?? false
+  let reportDeliveries = false
+  try {
+    reportDeliveries = await confirm({
+      message: 'Send delivery reports to the dashboard? (response codes, duration)',
+      default: true,
+    })
+  } catch { /* Ctrl-C → keep default */ }
 
-  if (needsReport) {
-    try {
-      reportDeliveries = await confirm({
-        message: 'Send delivery reports to the dashboard? (response codes, duration)',
-        default: true,
-      })
-    } catch { /* Ctrl-C → keep default */ }
-  }
-
-  if (needsCurl) {
-    try {
-      copyCurl = await confirm({
-        message: 'Auto-copy curl to clipboard on each received webhook?',
-        default: true,
-      })
-    } catch { /* Ctrl-C → keep default */ }
-  }
-
-  const updated = { ...cfg, reportDeliveries, copyCurl }
+  const updated = { ...cfg, reportDeliveries }
   save(updated)
   console.log(chalk.dim('  ─────────────────────────────────────\n'))
   return updated
@@ -361,10 +339,115 @@ export async function connect(flags) {
 
   let ws
   let sessionId = null
+  const curlSlots = new Array(9).fill(null) // rolling buffer, slots 0-8 → keys 1-9
+  let nextSlot = 0
   let reconnectDelay = 1000
   let reconnectAttempts = 0
   let pingInterval
   let disconnectedAt = null
+
+  // label positions — { row, slot } — row is always viewport-relative (updated on scroll)
+  const labelPositions = []
+  let cursorPosResolve = null
+  let stdinReady = false
+
+  function disableMouse() {
+    if (process.stdout.isTTY) process.stdout.write('\x1b[?1000l\x1b[?1006l')
+  }
+
+  // Async cursor row query — resolves via stdin response ESC[row;colR
+  function queryCursorRow() {
+    if (!stdinReady) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      cursorPosResolve = resolve
+      process.stdout.write('\x1b[6n')
+      setTimeout(() => {
+        if (cursorPosResolve === resolve) { cursorPosResolve = null; resolve(null) }
+      }, 100)
+    })
+  }
+
+  // Print the clickable hint, capture its viewport row, push to labelPositions.
+  async function printHint(label, slot) {
+    if (!process.stdin.isTTY) return
+    // Write without trailing newline so cursor sits on the hint row
+    process.stdout.write(chalk.dim(`          press ${chalk.bold(`[${label}]`)} or click · to copy curl`))
+    const row = await queryCursorRow()
+    if (row !== null) labelPositions.push({ row, slot })
+    process.stdout.write('\n')
+  }
+
+  // Set up interactive stdin — called once after all prompts are done.
+  function setupStdin() {
+    if (!process.stdin.isTTY || stdinReady) return
+    stdinReady = true
+
+    process.stdin.setRawMode(true)
+    process.stdin.resume()
+    process.stdin.setEncoding('utf8')
+
+    // Enable SGR extended mouse tracking (button + scroll events with full coords)
+    process.stdout.write('\x1b[?1000h\x1b[?1006h')
+
+    // Intercept stdout.write to track newlines → keep labelPositions rows in sync with scroll
+    const origWrite = process.stdout.write.bind(process.stdout)
+    process.stdout.write = function (chunk, ...args) {
+      if (typeof chunk === 'string') {
+        const nl = (chunk.match(/\n/g) ?? []).length
+        if (nl > 0) {
+          for (const e of labelPositions) e.row -= nl
+          // Prune labels that have scrolled off the top
+          const first = labelPositions.findIndex(e => e.row > 0)
+          if (first > 0) labelPositions.splice(0, first)
+          else if (first === -1) labelPositions.length = 0
+        }
+      }
+      return origWrite(chunk, ...args)
+    }
+
+    process.stdin.on('data', (key) => {
+      // Cursor position response: ESC[row;colR
+      const posMatch = key.match(/\x1b\[(\d+);(\d+)R/)
+      if (posMatch) {
+        cursorPosResolve?.(parseInt(posMatch[1], 10))
+        cursorPosResolve = null
+        return
+      }
+
+      // SGR mouse event: ESC[<btn;col;rowM (press) or ESC[<btn;col;rowm (release)
+      const mouseMatch = key.match(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/)
+      if (mouseMatch) {
+        const btn = parseInt(mouseMatch[1], 10)
+        const row = parseInt(mouseMatch[3], 10)
+        const pressed = mouseMatch[4] === 'M'
+        if (btn === 0 && pressed) {
+          // Find the label at this row (scroll-compensated)
+          const entry = labelPositions.findLast(e => e.row === row)
+          if (entry && curlSlots[entry.slot]) {
+            copyToClipboard(curlSlots[entry.slot])
+            process.stdout.write(`          ${chalk.dim(`📋 [${entry.slot + 1}] copied!`)}\n`)
+          }
+        }
+        return
+      }
+
+      // Numeric keys 1-9
+      const n = parseInt(key, 10)
+      if (n >= 1 && n <= 9 && curlSlots[n - 1]) {
+        copyToClipboard(curlSlots[n - 1])
+        process.stdout.write(`          ${chalk.dim(`📋 [${n}] copied!`)}\n`)
+        return
+      }
+
+      // Ctrl-C — raw mode prevents SIGINT, handle manually
+      if (key === '\u0003') {
+        disableMouse()
+        console.log(chalk.dim('\n  Disconnecting…'))
+        ws?.close()
+        process.exit(0)
+      }
+    })
+  }
 
   async function doConnect() {
     let connectToken
@@ -380,6 +463,7 @@ export async function connect(flags) {
 
     ws.on('open', async () => {
       console.log(chalk.green('  ✓ Connected'))
+      setupStdin()
 
       // Catch up on webhooks missed during the disconnection window
       if (disconnectedAt && cfg?.endpoint?.id && cfg?.auth?.token) {
@@ -388,7 +472,11 @@ export async function connect(flags) {
           if (missed.length > 0) {
             console.log(chalk.yellow(`\n  ↻ ${missed.length} webhook(s) received while disconnected — replaying…`))
             for (const wh of missed) {
-              await forwardWebhook(wh, forward, chalk.yellow(' [missed]'), { cfg, sessionId })
+              const slot = nextSlot
+              const label = slot + 1
+              nextSlot = (nextSlot + 1) % 9
+              curlSlots[slot] = await forwardWebhook(wh, forward, chalk.yellow(' [missed]'), { cfg, sessionId })
+              await printHint(label, slot)
             }
             console.log()
           }
@@ -420,8 +508,13 @@ export async function connect(flags) {
       }
 
       if (msg.type === 'webhook' || msg.type === 'replay') {
+        const slot = nextSlot
+        const label = slot + 1
+        nextSlot = (nextSlot + 1) % 9
+
         const tag = msg.type === 'replay' ? chalk.yellow(' [replay]') : ''
-        await forwardWebhook(msg.webhook, forward, tag, { cfg, sessionId })
+        curlSlots[slot] = await forwardWebhook(msg.webhook, forward, tag, { cfg, sessionId })
+        await printHint(label, slot)
       }
     })
 
@@ -465,8 +558,11 @@ export async function connect(flags) {
   })
 
   process.on('SIGINT', () => {
+    disableMouse()
     console.log(chalk.dim('\n  Disconnecting…'))
     ws?.close()
     process.exit(0)
   })
+
+  process.on('exit', disableMouse)
 }

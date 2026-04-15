@@ -336,7 +336,7 @@ export default function Webhooks() {
 
         {/* Detail dialog */}
         <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
-          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogContent className="w-[80vw] max-w-[80vw] max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {detail && <MethodBadge method={detail.method} />}
