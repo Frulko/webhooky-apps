@@ -35,7 +35,13 @@
       "Bash(grep -h \"process\\\\.env\\\\.\" /Users/mowmow/Lab/webhook-catcher/apps/server/src/**/*.js)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "Bash(chmod +x /Users/mowmow/Lab/webhook-catcher/scripts/release)"
+      "Bash(chmod +x /Users/mowmow/Lab/webhook-catcher/scripts/release)",
+      "Bash(corepack use:*)",
+      "Bash(./scripts/release:*)",
+      "Bash(git stash:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx --yes vite build)",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }
