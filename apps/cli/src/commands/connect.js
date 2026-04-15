@@ -15,6 +15,14 @@ const HOP_BY_HOP = new Set([
   'te', 'trailer', 'upgrade', 'proxy-authorization', 'content-length',
 ])
 
+let debugMode = false
+export function setDebug(val) { debugMode = val }
+
+function dbg(...args) {
+  if (!debugMode) return
+  console.log(chalk.dim('  [debug]'), ...args)
+}
+
 async function forwardWebhook(wh, forward, tag = '') {
   const ts = new Date().toLocaleTimeString()
   console.log(`  ${chalk.dim(ts)} ${chalk.blue(wh.method ?? 'POST')}${tag} ${chalk.dim('→')} ${forward}`)
@@ -42,6 +50,11 @@ async function forwardWebhook(wh, forward, tag = '') {
     forwardHeaders['x-webhook-id'] = wh.id
     forwardHeaders['x-forwarded-by'] = 'hooky'
 
+    dbg(`→ ${wh.method ?? 'POST'} ${forwardUrl}`)
+    dbg('headers sent:', JSON.stringify(forwardHeaders, null, 4))
+    if (hasBody) dbg('body:', body?.slice(0, 500))
+    dbg(`NODE_TLS_REJECT_UNAUTHORIZED=${process.env.NODE_TLS_REJECT_UNAUTHORIZED}`)
+
     const res = await fetch(forwardUrl, {
       method: wh.method ?? 'POST',
       headers: forwardHeaders,
@@ -49,10 +62,22 @@ async function forwardWebhook(wh, forward, tag = '') {
       signal: AbortSignal.timeout(10000),
     })
 
+    dbg(`← ${res.status} ${res.statusText}`)
+    if (debugMode) {
+      const resHeaders = {}
+      res.headers.forEach((v, k) => { resHeaders[k] = v })
+      dbg('response headers:', JSON.stringify(resHeaders, null, 4))
+    }
+
     const color = res.ok ? chalk.green : chalk.red
     console.log(`          ${color(`→ ${res.status} ${res.statusText}`)}`)
   } catch (err) {
     console.log(`          ${chalk.red(`✗ ${err.message}`)}`)
+    if (debugMode) {
+      dbg(`error code:  ${err.code ?? '(none)'}`)
+      dbg(`error cause: ${err.cause?.message ?? err.cause ?? '(none)'}`)
+      dbg('stack:', err.stack)
+    }
   }
 }
 
@@ -135,6 +160,8 @@ async function pickEndpoint(cfg) {
 }
 
 export async function connect(flags) {
+  if (flags.debug) setDebug(true)
+
   let cfg = load()
   const opts = merge(cfg, flags)
 
@@ -204,6 +231,7 @@ export async function connect(flags) {
   console.log(`  ${chalk.dim('Endpoint:')}      ${chalk.cyan(cfg?.endpoint?.name ?? token.slice(0, 8) + '…')}`)
   console.log(`  ${chalk.dim('Forwarding to:')} ${chalk.green(forward)}`)
   console.log(`  ${chalk.dim('Server:')}        ${chalk.dim(server)}`)
+  if (debugMode) console.log(`  ${chalk.dim('Debug:')}         ${chalk.yellow('ON')}`)
   console.log(chalk.dim('  ─────────────────────────────────────\n'))
 
   let ws

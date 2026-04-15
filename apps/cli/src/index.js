@@ -79,6 +79,7 @@ program
   .option('-f, --forward <url>',   'Local URL to forward to (overrides config)')
   .option('-k, --key <apiKey>',    'Client API key (overrides config)')
   .option('-s, --server <url>',    'Server URL (overrides config)')
+  .option('-d, --debug',           'Verbose debug output (headers, TLS errors, etc.)')
   .action(connect)
 
 program
