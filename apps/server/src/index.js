@@ -1,11 +1,14 @@
 import 'dotenv/config'
 import { buildApp } from './app.js'
+import { migrate } from './db/migrate.js'
 
 // Fail fast in production if JWT_SECRET is not set
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   console.error('FATAL: JWT_SECRET environment variable is required in production')
   process.exit(1)
 }
+
+await migrate()
 
 const app = await buildApp()
 

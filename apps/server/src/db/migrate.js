@@ -35,12 +35,16 @@ export async function migrate() {
   }
 
   console.log('Migrations done.')
+}
+
+async function migrateAndClose() {
+  await migrate()
   await sql.end()
 }
 
 // Run directly (node migrate.js)
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  migrate().catch((err) => {
+  migrateAndClose().catch((err) => {
     console.error('Migration failed:', err)
     process.exit(1)
   })
