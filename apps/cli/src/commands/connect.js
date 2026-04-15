@@ -4,12 +4,11 @@ import { confirm } from '@inquirer/prompts'
 import { load, save, merge } from '../config.js'
 import { listClients, listEndpoints, requestConnectToken, listMissedWebhooks } from '../api.js'
 import { select, input } from '@inquirer/prompts'
-import { Agent } from 'undici'
-
 const MAX_RECONNECTS = 10
 
-// Ignore TLS errors for forward targets (self-signed certs, Valet .test, etc.)
-const insecureDispatcher = new Agent({ connect: { rejectUnauthorized: false } })
+// Disable TLS verification for forward targets — self-signed certs, Valet .test, localhost HTTPS.
+// This only affects the CLI process, not the server.
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 
 const HOP_BY_HOP = new Set([
   'host', 'connection', 'keep-alive', 'transfer-encoding',
