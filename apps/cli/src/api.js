@@ -61,6 +61,17 @@ export async function listMissedWebhooks(cfg, endpointId, since) {
   return res.json()
 }
 
+export async function reportDelivery(cfg, webhookId, data) {
+  try {
+    await authedFetch(cfg, `/api/webhooks/${webhookId}/delivery`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  } catch {
+    // Fire-and-forget — never crash the CLI on a reporting failure
+  }
+}
+
 export async function requestConnectToken(cfg, endpointToken, apiKey) {
   const res = await authedFetch(cfg, '/api/ws-token', {
     method: 'POST',

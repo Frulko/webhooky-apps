@@ -27,7 +27,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { RefreshCw, Eye, Loader2 } from 'lucide-react'
+import { RefreshCw, Eye, Loader2, Copy, Check, Terminal } from 'lucide-react'
 import api from '@/lib/api'
 import { formatDistanceToNow, format } from 'date-fns'
 import { toast } from 'sonner'
@@ -58,6 +58,19 @@ interface Replay {
   responseCode: number | null
   errorMsg: string | null
   createdAt: string
+}
+
+interface Delivery {
+  id: string
+  sessionId: string | null
+  statusCode: number | null
+  responseHeaders: Record<string, string> | null
+  responseBody: string | null
+  durationMs: number | null
+  errorMsg: string | null
+  forwardedAt: string
+  sessionIp: string | null
+  sessionConnectedAt: string | null
 }
 
 function JsonHighlight({ value }: { value: string }) {
@@ -113,11 +126,57 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+function HttpStatusBadge({ code }: { code: number | null }) {
+  if (code === null) return <Badge variant="destructive" className="text-xs font-mono">ERR</Badge>
+  const cls =
+    code < 300 ? 'bg-green-500/10 text-green-700' :
+    code < 400 ? 'bg-blue-500/10 text-blue-600' :
+    code < 500 ? 'bg-orange-500/10 text-orange-600' :
+    'bg-red-500/10 text-red-600'
+  return <Badge variant="outline" className={`text-xs font-mono ${cls}`}>{code}</Badge>
+}
+
+const HOP_BY_HOP_WEB = new Set([
+  'host', 'connection', 'keep-alive', 'transfer-encoding',
+  'te', 'trailer', 'upgrade', 'proxy-authorization', 'content-length',
+])
+
+function buildCurl(detail: WebhookDetail, parsedHeaders: Record<string, string>, body: string, targetUrl: string): string {
+  const lines: string[] = [`curl -X ${detail.method ?? 'POST'} '${targetUrl}'`]
+  for (const [k, v] of Object.entries(parsedHeaders)) {
+    if (!HOP_BY_HOP_WEB.has(k.toLowerCase())) {
+      lines.push(`  -H '${k}: ${String(v).replace(/'/g, "'\\''")}'`)
+    }
+  }
+  if (body) {
+    const escaped = body.replace(/'/g, "'\\''")
+    lines.push(`  -d '${escaped}'`)
+  }
+  return lines.join(' \\\n')
+}
+
+function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false)
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <Button variant="outline" size="sm" onClick={handleCopy} className="h-7 gap-1.5 text-xs">
+      {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? 'Copied!' : label}
+    </Button>
+  )
+}
+
 export default function Webhooks() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [replayTarget, setReplayTarget] = useState<'ws' | 'url'>('ws')
   const [replayUrl, setReplayUrl] = useState('')
   const [replayingId, setReplayingId] = useState<string | null>(null)
+  const [curlTarget, setCurlTarget] = useState('http://localhost:3000/webhook')
   const qc = useQueryClient()
 
   const { data: webhooks, isLoading } = useQuery({
@@ -136,6 +195,13 @@ export default function Webhooks() {
     queryKey: ['replays', selectedId],
     queryFn: () => api.get(`/webhooks/${selectedId}/replays`).then((r) => r.data as Replay[]),
     enabled: !!selectedId,
+  })
+
+  const { data: deliveries } = useQuery({
+    queryKey: ['deliveries', selectedId],
+    queryFn: () => api.get(`/webhooks/${selectedId}/deliveries`).then((r) => r.data as Delivery[]),
+    enabled: !!selectedId,
+    refetchInterval: 5000,
   })
 
   const replayMutation = useMutation({
@@ -270,7 +336,7 @@ export default function Webhooks() {
 
         {/* Detail dialog */}
         <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
-          <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {detail && <MethodBadge method={detail.method} />}
@@ -288,6 +354,14 @@ export default function Webhooks() {
                 <TabsList className="shrink-0">
                   <TabsTrigger value="body">Body</TabsTrigger>
                   <TabsTrigger value="headers">Headers</TabsTrigger>
+                  <TabsTrigger value="curl">
+                    <Terminal className="h-3.5 w-3.5 mr-1" />curl
+                  </TabsTrigger>
+                  <TabsTrigger value="deliveries">
+                    Deliveries {deliveries && deliveries.length > 0 && (
+                      <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px] font-medium">{deliveries.length}</span>
+                    )}
+                  </TabsTrigger>
                   <TabsTrigger value="replay">Replay</TabsTrigger>
                   <TabsTrigger value="history">History ({replays?.length ?? 0})</TabsTrigger>
                 </TabsList>
@@ -326,6 +400,94 @@ export default function Webhooks() {
                         ))}
                       </tbody>
                     </table>
+                  </ScrollArea>
+                </TabsContent>
+
+                {/* ── curl tab ─────────────────────────────── */}
+                <TabsContent value="curl" className="space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Target URL</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={curlTarget}
+                        onChange={(e) => setCurlTarget(e.target.value)}
+                        placeholder="http://localhost:3000/webhook"
+                        className="font-mono text-xs"
+                      />
+                      <CopyButton
+                        text={detail ? buildCurl(detail, parsedHeaders, body, curlTarget) : ''}
+                        label="Copy curl"
+                      />
+                    </div>
+                  </div>
+                  <ScrollArea className="h-56 w-full border rounded-md bg-muted/30">
+                    <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-all leading-relaxed text-muted-foreground">
+                      {detail ? buildCurl(detail, parsedHeaders, body, curlTarget) : ''}
+                    </pre>
+                  </ScrollArea>
+                  <p className="text-[11px] text-muted-foreground">
+                    Paste this curl in your terminal, or import it directly into Bruno / Insomnia.
+                  </p>
+                </TabsContent>
+
+                {/* ── deliveries tab ───────────────────────── */}
+                <TabsContent value="deliveries" className="flex-1 min-h-0">
+                  <ScrollArea className="h-64">
+                    <div className="space-y-2">
+                      {(!deliveries || deliveries.length === 0) && (
+                        <p className="text-sm text-muted-foreground text-center py-6">
+                          No deliveries yet — connect the CLI to start forwarding.
+                        </p>
+                      )}
+                      {deliveries?.map((d) => (
+                        <div key={d.id} className="border rounded-md p-3 text-sm space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <HttpStatusBadge code={d.statusCode} />
+                            {d.durationMs !== null && (
+                              <span className="text-xs text-muted-foreground">{d.durationMs}ms</span>
+                            )}
+                            {d.sessionIp && (
+                              <span className="text-xs font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                                {d.sessionIp}
+                              </span>
+                            )}
+                            <span className="text-xs text-muted-foreground ml-auto">
+                              {formatDistanceToNow(new Date(d.forwardedAt), { addSuffix: true })}
+                            </span>
+                          </div>
+                          {d.errorMsg && (
+                            <p className="text-xs text-destructive font-mono break-all">{d.errorMsg}</p>
+                          )}
+                          {d.responseBody && (
+                            <details className="group">
+                              <summary className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground">
+                                Response body
+                              </summary>
+                              <ScrollArea className="mt-1 h-28 border rounded bg-muted/30">
+                                <pre className="p-2 text-[11px] font-mono whitespace-pre-wrap break-all leading-relaxed">
+                                  <JsonHighlight value={d.responseBody} />
+                                </pre>
+                              </ScrollArea>
+                            </details>
+                          )}
+                          {d.responseHeaders && Object.keys(d.responseHeaders).length > 0 && (
+                            <details>
+                              <summary className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground">
+                                Response headers
+                              </summary>
+                              <div className="mt-1 space-y-0.5">
+                                {Object.entries(d.responseHeaders).map(([k, v]) => (
+                                  <div key={k} className="flex gap-2 text-[11px] font-mono">
+                                    <span className="text-muted-foreground shrink-0">{k}:</span>
+                                    <span className="break-all">{String(v)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </ScrollArea>
                 </TabsContent>
 

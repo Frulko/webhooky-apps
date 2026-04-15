@@ -14,6 +14,7 @@ import authRoutes from './routes/auth.js'
 import hookRoutes from './routes/hook.js'
 import webhookRoutes from './routes/webhooks.js'
 import replayRoutes from './routes/replay.js'
+import deliveryRoutes from './routes/deliveries.js'
 import wsRoutes from './routes/ws.js'
 import wsTokenRoutes from './routes/ws-token.js'
 import connectionsRoutes from './routes/connections.js'
@@ -79,6 +80,7 @@ export async function buildApp({ logger = true, serveStatic = true } = {}) {
   await fastify.register(authRoutes, { prefix: '/api' })
   await fastify.register(webhookRoutes, { prefix: '/api' })
   await fastify.register(replayRoutes, { prefix: '/api' })
+  await fastify.register(deliveryRoutes, { prefix: '/api' })
   await fastify.register(connectionsRoutes, { prefix: '/api' })
   await fastify.register(wsTokenRoutes, { prefix: '/api' })
   await fastify.register(adminUsersRoutes, { prefix: '/api' })

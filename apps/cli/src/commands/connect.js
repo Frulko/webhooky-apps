@@ -1,8 +1,10 @@
 import WebSocket from 'ws'
 import chalk from 'chalk'
 import { confirm } from '@inquirer/prompts'
+import { spawnSync } from 'node:child_process'
+import { platform } from 'node:os'
 import { load, save, merge } from '../config.js'
-import { listClients, listEndpoints, requestConnectToken, listMissedWebhooks } from '../api.js'
+import { listClients, listEndpoints, requestConnectToken, listMissedWebhooks, reportDelivery } from '../api.js'
 import { select, input } from '@inquirer/prompts'
 const MAX_RECONNECTS = 10
 
@@ -15,6 +17,40 @@ const HOP_BY_HOP = new Set([
   'te', 'trailer', 'upgrade', 'proxy-authorization', 'content-length',
 ])
 
+function buildCurl(wh, targetUrl) {
+  const method = wh.method ?? 'POST'
+  const headers = wh.headers ?? {}
+  const parsedHeaders = typeof headers === 'string' ? JSON.parse(headers) : headers
+  const body = typeof wh.body === 'object' ? JSON.stringify(wh.body) : (wh.body || '')
+
+  const parts = [`curl -X ${method} '${targetUrl}'`]
+  for (const [k, v] of Object.entries(parsedHeaders)) {
+    if (!HOP_BY_HOP.has(k.toLowerCase())) {
+      parts.push(`  -H '${k}: ${String(v).replace(/'/g, "'\\''")}'`)
+    }
+  }
+  if (body) parts.push(`  -d '${body.replace(/'/g, "'\\''")}'`)
+  return parts.join(' \\\n')
+}
+
+function copyToClipboard(text) {
+  try {
+    const buf = Buffer.from(text)
+    const plat = platform()
+    if (plat === 'darwin') {
+      spawnSync('pbcopy', { input: buf })
+    } else if (plat === 'linux') {
+      const r = spawnSync('xclip', ['-selection', 'clipboard'], { input: buf })
+      if (r.error) spawnSync('xsel', ['--clipboard', '--input'], { input: buf })
+    } else if (plat === 'win32') {
+      spawnSync('clip', { input: buf, shell: true })
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 let debugMode = false
 export function setDebug(val) { debugMode = val }
 
@@ -23,9 +59,11 @@ function dbg(...args) {
   console.log(chalk.dim('  [debug]'), ...args)
 }
 
-async function forwardWebhook(wh, forward, tag = '') {
+async function forwardWebhook(wh, forward, tag = '', opts = {}) {
   const ts = new Date().toLocaleTimeString()
   console.log(`  ${chalk.dim(ts)} ${chalk.blue(wh.method ?? 'POST')}${tag} ${chalk.dim('→')} ${forward}`)
+
+  const startMs = Date.now()
 
   try {
     const body = typeof wh.body === 'object' ? JSON.stringify(wh.body) : (wh.body || undefined)
@@ -62,16 +100,41 @@ async function forwardWebhook(wh, forward, tag = '') {
       signal: AbortSignal.timeout(10000),
     })
 
-    dbg(`← ${res.status} ${res.statusText}`)
-    if (debugMode) {
-      const resHeaders = {}
-      res.headers.forEach((v, k) => { resHeaders[k] = v })
-      dbg('response headers:', JSON.stringify(resHeaders, null, 4))
-    }
+    const durationMs = Date.now() - startMs
+
+    dbg(`← ${res.status} ${res.statusText} (${durationMs}ms)`)
+
+    const resHeaders = {}
+    res.headers.forEach((v, k) => { resHeaders[k] = v })
+    if (debugMode) dbg('response headers:', JSON.stringify(resHeaders, null, 4))
+
+    let responseBody
+    try {
+      const text = await res.text()
+      responseBody = text.slice(0, 10_000) // cap at 10 KB
+    } catch { /* ignore */ }
 
     const color = res.ok ? chalk.green : chalk.red
-    console.log(`          ${color(`→ ${res.status} ${res.statusText}`)}`)
+    console.log(`          ${color(`→ ${res.status} ${res.statusText}`)} ${chalk.dim(`${durationMs}ms`)}`)
+
+    if (opts.cfg?.copyCurl) {
+      const curl = buildCurl(wh, forward)
+      const ok = copyToClipboard(curl)
+      if (ok) console.log(`          ${chalk.dim('📋 curl copied to clipboard')}`)
+    }
+
+    if (opts.cfg?.reportDeliveries && wh.id) {
+      reportDelivery(opts.cfg, wh.id, {
+        sessionId: opts.sessionId ?? null,
+        statusCode: res.status,
+        responseHeaders: resHeaders,
+        responseBody,
+        durationMs,
+      })
+    }
   } catch (err) {
+    const durationMs = Date.now() - startMs
+
     // Unwrap cause chain — Node fetch wraps the real error in err.cause
     const causes = []
     let cur = err
@@ -88,7 +151,57 @@ async function forwardWebhook(wh, forward, tag = '') {
       })
       dbg('stack:', err.stack)
     }
+
+    if (opts.cfg?.copyCurl) {
+      const curl = buildCurl(wh, forward)
+      const ok = copyToClipboard(curl)
+      if (ok) console.log(`          ${chalk.dim('📋 curl copied to clipboard')}`)
+    }
+
+    if (opts.cfg?.reportDeliveries && wh.id) {
+      reportDelivery(opts.cfg, wh.id, {
+        sessionId: opts.sessionId ?? null,
+        durationMs,
+        errorMsg: `${err.message}${detail}`,
+      })
+    }
   }
+}
+
+// Ask once (when keys are missing from config) then persist the answers.
+async function askFirstRunOptions(cfg) {
+  const needsReport = cfg?.reportDeliveries === undefined
+  const needsCurl   = cfg?.copyCurl === undefined
+  if (!needsReport && !needsCurl) return cfg
+
+  console.log(chalk.dim('\n  ─────────────────────────────────────'))
+  console.log(`  ${chalk.bold('First-time options')} ${chalk.dim('(saved to config, ask once)')}`)
+
+  let reportDeliveries = cfg?.reportDeliveries ?? false
+  let copyCurl         = cfg?.copyCurl ?? false
+
+  if (needsReport) {
+    try {
+      reportDeliveries = await confirm({
+        message: 'Send delivery reports to the dashboard? (response codes, duration)',
+        default: true,
+      })
+    } catch { /* Ctrl-C → keep default */ }
+  }
+
+  if (needsCurl) {
+    try {
+      copyCurl = await confirm({
+        message: 'Auto-copy curl to clipboard on each received webhook?',
+        default: true,
+      })
+    } catch { /* Ctrl-C → keep default */ }
+  }
+
+  const updated = { ...cfg, reportDeliveries, copyCurl }
+  save(updated)
+  console.log(chalk.dim('  ─────────────────────────────────────\n'))
+  return updated
 }
 
 async function pickEndpoint(cfg) {
@@ -173,6 +286,8 @@ export async function connect(flags) {
   if (flags.debug) setDebug(true)
 
   let cfg = load()
+  // Ask once for options that haven't been configured yet
+  if (cfg?.auth?.token) cfg = await askFirstRunOptions(cfg)
   const opts = merge(cfg, flags)
 
   // Flags bypass all prompts
@@ -245,6 +360,7 @@ export async function connect(flags) {
   console.log(chalk.dim('  ─────────────────────────────────────\n'))
 
   let ws
+  let sessionId = null
   let reconnectDelay = 1000
   let reconnectAttempts = 0
   let pingInterval
@@ -272,7 +388,7 @@ export async function connect(flags) {
           if (missed.length > 0) {
             console.log(chalk.yellow(`\n  ↻ ${missed.length} webhook(s) received while disconnected — replaying…`))
             for (const wh of missed) {
-              await forwardWebhook(wh, forward, chalk.yellow(' [missed]'))
+              await forwardWebhook(wh, forward, chalk.yellow(' [missed]'), { cfg, sessionId })
             }
             console.log()
           }
@@ -294,6 +410,10 @@ export async function connect(flags) {
       try { msg = JSON.parse(data.toString()) } catch { return }
 
       if (msg.type === 'pong') return
+      if (msg.type === 'connected') {
+        sessionId = msg.sessionId ?? null
+        return
+      }
       if (msg.type === 'error') {
         console.error(chalk.red(`  ✗ Error: ${msg.message}`))
         process.exit(1)
@@ -301,7 +421,7 @@ export async function connect(flags) {
 
       if (msg.type === 'webhook' || msg.type === 'replay') {
         const tag = msg.type === 'replay' ? chalk.yellow(' [replay]') : ''
-        await forwardWebhook(msg.webhook, forward, tag)
+        await forwardWebhook(msg.webhook, forward, tag, { cfg, sessionId })
       }
     })
 
