@@ -1,65 +1,97 @@
 import { verifyHmac } from '../services/hmac.js'
 import { broadcast } from '../ws/bridge.js'
 
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
+
 // Public webhook receiver — no /api prefix, registered at root
 export default async function hookRoutes(fastify) {
-  fastify.post('/hook/:token', {
+  fastify.route({
+    method: METHODS,
+    url: '/hook/:token',
     config: {
       rawBody: true,
       rateLimit: { max: 120, timeWindow: '1 minute' },
     },
-    bodyLimit: 1_048_576, // 1 MB max per webhook
-  }, async (request, reply) => {
-    const { token } = request.params
+    bodyLimit: 1_048_576, // 1 MB
+    handler: async (request, reply) => {
+      const { token } = request.params
 
-    const [endpoint] = await fastify.sql`
-      SELECT id, hmac_secret, hmac_header, active
-      FROM endpoints WHERE token = ${token}
-    `
+      const [endpoint] = await fastify.sql`
+        SELECT id, hmac_secret, hmac_header, active
+        FROM endpoints WHERE token = ${token}
+      `
 
-    if (!endpoint || !endpoint.active) {
-      return reply.code(404).send({ error: 'Endpoint not found' })
-    }
-
-    if (endpoint.hmacSecret) {
-      const sigHeader = request.headers[endpoint.hmacHeader?.toLowerCase()]
-      const rawBody = request.rawBody ?? Buffer.from(JSON.stringify(request.body))
-      const valid = verifyHmac(endpoint.hmacSecret, rawBody, sigHeader)
-      if (!valid) {
-        return reply.code(401).send({ error: 'Invalid signature' })
+      if (!endpoint || !endpoint.active) {
+        return reply.code(404).send({ error: 'Not found' })
       }
-    }
 
-    const bodyRaw = request.body
-    const bodyText = typeof bodyRaw === 'string' ? bodyRaw : JSON.stringify(bodyRaw)
-    const bodyParsed = typeof bodyRaw === 'object' ? bodyRaw : null
-    const sizeBytes = Buffer.byteLength(bodyText, 'utf8')
+      // ── Body normalisation ──────────────────────────────────────────────
+      const bodyRaw = request.body
 
-    const [webhook] = await fastify.sql`
-      INSERT INTO webhooks (endpoint_id, method, headers, body, body_parsed, source_ip, size_bytes)
-      VALUES (
-        ${endpoint.id},
-        ${request.method},
-        ${fastify.sql.json(request.headers)},
-        ${bodyText},
-        ${bodyParsed ? fastify.sql.json(bodyParsed) : null},
-        ${request.ip},
-        ${sizeBytes}
-      )
-      RETURNING id, endpoint_id, method, source_ip, size_bytes, received_at
-    `
+      let bodyText = ''
+      let bodyParsed = null
 
-    const forwarded = broadcast(endpoint.id, {
-      type: 'webhook',
-      webhook: {
-        ...webhook,
-        headers: request.headers,
-        body: bodyParsed ?? bodyText,
-      },
-    })
+      if (bodyRaw === undefined || bodyRaw === null) {
+        bodyText = ''
+      } else if (typeof bodyRaw === 'string') {
+        bodyText = bodyRaw
+        try { bodyParsed = JSON.parse(bodyRaw) } catch {}
+      } else if (Buffer.isBuffer(bodyRaw)) {
+        bodyText = bodyRaw.toString('utf8')
+        try { bodyParsed = JSON.parse(bodyText) } catch {}
+      } else if (typeof bodyRaw === 'object') {
+        bodyText = JSON.stringify(bodyRaw)
+        bodyParsed = bodyRaw
+      } else {
+        bodyText = String(bodyRaw)
+      }
 
-    fastify.log.info({ webhookId: webhook.id, forwarded }, 'Webhook received')
+      // ── HMAC verification ───────────────────────────────────────────────
+      if (endpoint.hmacSecret) {
+        const sigHeader = request.headers[endpoint.hmacHeader?.toLowerCase()]
+        const raw = request.rawBody ?? Buffer.from(bodyText)
+        if (!verifyHmac(endpoint.hmacSecret, raw, sigHeader)) {
+          return reply.code(401).send({ error: 'Invalid signature' })
+        }
+      }
 
-    return reply.code(200).send({ received: true, id: webhook.id, forwarded })
+      const sizeBytes = Buffer.byteLength(bodyText, 'utf8')
+      const queryParams = request.query ?? {}
+
+      // ── Persist ─────────────────────────────────────────────────────────
+      const [webhook] = await fastify.sql`
+        INSERT INTO webhooks
+          (endpoint_id, method, headers, query_params, body, body_parsed, source_ip, size_bytes)
+        VALUES (
+          ${endpoint.id},
+          ${request.method},
+          ${fastify.sql.json(request.headers)},
+          ${fastify.sql.json(queryParams)},
+          ${bodyText || null},
+          ${bodyParsed ? fastify.sql.json(bodyParsed) : null},
+          ${request.ip},
+          ${sizeBytes}
+        )
+        RETURNING id, endpoint_id, method, source_ip, size_bytes, received_at
+      `
+
+      const forwarded = broadcast(endpoint.id, {
+        type: 'webhook',
+        webhook: {
+          ...webhook,
+          headers: request.headers,
+          query_params: queryParams,
+          body: bodyParsed ?? bodyText ?? null,
+        },
+      })
+
+      fastify.log.info({ webhookId: webhook.id, method: request.method, forwarded }, 'Webhook received')
+
+      if (request.method === 'HEAD') {
+        return reply.code(200).send()
+      }
+
+      return reply.code(200).send({ received: true, id: webhook.id, forwarded })
+    },
   })
 }

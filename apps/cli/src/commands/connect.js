@@ -197,17 +197,27 @@ export async function connect(flags) {
         console.log(`  ${chalk.dim(ts)} ${chalk.blue(wh.method ?? 'POST')}${tag} ${chalk.dim('→')} ${forward}`)
 
         try {
-          const body = typeof wh.body === 'object' ? JSON.stringify(wh.body) : wh.body
+          const body = typeof wh.body === 'object' ? JSON.stringify(wh.body) : (wh.body || undefined)
           const contentType = wh.headers?.['content-type'] ?? 'application/json'
+          const hasBody = body !== undefined && body !== null && body !== ''
 
-          const res = await fetch(forward, {
+          // Append query params to forward URL
+          let forwardUrl = forward
+          const qp = wh.query_params
+          if (qp && typeof qp === 'object' && Object.keys(qp).length > 0) {
+            const u = new URL(forward)
+            for (const [k, v] of Object.entries(qp)) u.searchParams.set(k, v)
+            forwardUrl = u.toString()
+          }
+
+          const res = await fetch(forwardUrl, {
             method: wh.method ?? 'POST',
             headers: {
-              'content-type': contentType,
+              ...(hasBody ? { 'content-type': contentType } : {}),
               'x-webhook-id': wh.id,
               'x-forwarded-by': 'hooky',
             },
-            body,
+            body: hasBody ? body : undefined,
             signal: AbortSignal.timeout(10000),
           })
 
