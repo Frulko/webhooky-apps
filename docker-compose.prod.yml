@@ -26,7 +26,7 @@ services:
   server:
     image: ${DOCKER_IMAGE:-frulko/webhooky:latest}
     ports:
-      - '3000:3000'
+      - '${APP_PORT:-3000}:3000'
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://webhook:webhook@postgres:5432/webhook_catcher
@@ -34,7 +34,6 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       CORS_ORIGIN: ${CORS_ORIGIN:-}
-      PORT: ${PORT:-3000}
       HOST: ${HOST:-0.0.0.0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     networks:
