@@ -1,8 +1,8 @@
 version: '3.9'
 
-# Production compose — uses pre-built image from ghcr.io instead of local build.
-# Set GHCR_IMAGE to your full image path, e.g.:
-#   GHCR_IMAGE=ghcr.io/yourname/webhook-catcher:latest
+# Production compose — uses pre-built image from Docker Hub.
+# Override the image tag via DOCKER_IMAGE, e.g.:
+#   DOCKER_IMAGE=frulko/webhooky:0.6.0
 #
 # Usage:
 #   docker compose -f docker-compose.prod.yml up -d
@@ -26,7 +26,7 @@ services:
       - internal
 
   server:
-    image: ${GHCR_IMAGE:-ghcr.io/yourname/webhook-catcher:latest}
+    image: ${DOCKER_IMAGE:-frulko/webhooky:latest}
     restart: unless-stopped
     ports:
       - '3000:3000'
