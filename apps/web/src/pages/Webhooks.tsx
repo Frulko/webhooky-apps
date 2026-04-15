@@ -431,8 +431,17 @@ export default function Webhooks() {
                 </TabsContent>
 
                 {/* ── deliveries tab ───────────────────────── */}
-                <TabsContent value="deliveries" className="flex-1 min-h-0">
-                  <ScrollArea className="h-64">
+                <TabsContent value="deliveries" className="flex-1 min-h-0 space-y-2">
+                  <div className="flex gap-2 items-center">
+                    <Label className="text-xs text-muted-foreground shrink-0">Target URL</Label>
+                    <Input
+                      value={curlTarget}
+                      onChange={(e) => setCurlTarget(e.target.value)}
+                      placeholder="http://localhost:3000/webhook"
+                      className="font-mono text-xs h-7"
+                    />
+                  </div>
+                  <ScrollArea className="h-60">
                     <div className="space-y-2">
                       {(!deliveries || deliveries.length === 0) && (
                         <p className="text-sm text-muted-foreground text-center py-6">

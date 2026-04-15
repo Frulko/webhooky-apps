@@ -449,13 +449,30 @@ export async function connect(flags) {
     })
   }
 
-  async function doConnect() {
+  async function doConnect(isReconnect = false) {
     let connectToken
     try {
       connectToken = await requestConnectToken(cfg, token, key)
     } catch (err) {
-      console.error(chalk.red(`  ✗ ${err.message}`))
-      process.exit(1)
+      if (!isReconnect) {
+        console.error(chalk.red(`  ✗ ${err.message}`))
+        process.exit(1)
+      }
+      // Server not ready yet — keep retrying with the same backoff
+      reconnectAttempts++
+      if (reconnectAttempts > MAX_RECONNECTS) {
+        console.error(chalk.red(`\n  ✗ Failed to reconnect after ${MAX_RECONNECTS} attempts.`))
+        console.error(chalk.dim('  Run `hooky connect` to retry.\n'))
+        process.exit(1)
+      }
+      console.log(chalk.dim(
+        `  ↻ Server not ready (attempt ${reconnectAttempts}/${MAX_RECONNECTS}). Retrying in ${reconnectDelay / 1000}s…`
+      ))
+      setTimeout(() => {
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000)
+        doConnect(true).catch(() => {})
+      }, reconnectDelay)
+      return
     }
 
     const fullUrl = `${wsBase}/ws/${token}?t=${connectToken}`
@@ -540,7 +557,7 @@ export async function connect(flags) {
       ))
       setTimeout(() => {
         reconnectDelay = Math.min(reconnectDelay * 2, 30000)
-        doConnect().catch((err) => {
+        doConnect(true).catch((err) => {
           console.error(chalk.red(`  ✗ Reconnect failed: ${err.message}`))
           process.exit(1)
         })
