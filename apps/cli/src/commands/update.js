@@ -13,8 +13,19 @@ function currentVersion() {
 }
 
 export async function latestVersion() {
+  // Use `npm view` as primary source — bypasses CDN cache, always authoritative.
   try {
-    const res = await fetch('https://registry.npmjs.org/webhooky/latest', {
+    const v = execSync('npm view webhooky version', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 8000,
+    }).toString().trim()
+    if (v) return v
+  } catch {}
+
+  // Fallback: registry REST API with cache-busting headers
+  try {
+    const res = await fetch(`https://registry.npmjs.org/webhooky/latest?t=${Date.now()}`, {
+      headers: { 'cache-control': 'no-cache', pragma: 'no-cache' },
       signal: AbortSignal.timeout(5000),
     })
     if (!res.ok) return null
