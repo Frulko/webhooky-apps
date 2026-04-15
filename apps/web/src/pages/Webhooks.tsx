@@ -336,7 +336,7 @@ export default function Webhooks() {
 
         {/* Detail dialog */}
         <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
-          <DialogContent className="w-[80vw] max-w-[80vw] max-h-[90vh] flex flex-col">
+          <DialogContent className="w-[80vw] max-w-[80vw] sm:w-[80vw] sm:max-w-[80vw] max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {detail && <MethodBadge method={detail.method} />}
@@ -454,6 +454,10 @@ export default function Webhooks() {
                             <span className="text-xs text-muted-foreground ml-auto">
                               {formatDistanceToNow(new Date(d.forwardedAt), { addSuffix: true })}
                             </span>
+                            <CopyButton
+                              text={detail ? buildCurl(detail, parsedHeaders, body, curlTarget) : ''}
+                              label="curl"
+                            />
                           </div>
                           {d.errorMsg && (
                             <p className="text-xs text-destructive font-mono break-all">{d.errorMsg}</p>
