@@ -21,6 +21,12 @@ import {
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { RefreshCw, Eye, Loader2 } from 'lucide-react'
 import api from '@/lib/api'
 import { formatDistanceToNow, format } from 'date-fns'
@@ -65,11 +71,11 @@ function JsonHighlight({ value }: { value: string }) {
   const highlighted = JSON.stringify(parsed, null, 2).replace(
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
     (match) => {
-      let cls = 'text-sky-600 dark:text-sky-400' // number
+      let cls = 'text-sky-600 dark:text-sky-400'
       if (/^"/.test(match)) {
         cls = /:$/.test(match)
-          ? 'text-violet-600 dark:text-violet-400 font-medium' // key
-          : 'text-green-700 dark:text-green-400' // string value
+          ? 'text-violet-600 dark:text-violet-400 font-medium'
+          : 'text-green-700 dark:text-green-400'
       } else if (/true|false/.test(match)) {
         cls = 'text-amber-600 dark:text-amber-400'
       } else if (/null/.test(match)) {
@@ -84,14 +90,16 @@ function JsonHighlight({ value }: { value: string }) {
 
 function MethodBadge({ method }: { method: string }) {
   const colors: Record<string, string> = {
-    POST: 'bg-blue-500/10 text-blue-600',
-    GET: 'bg-green-500/10 text-green-600',
-    PUT: 'bg-yellow-500/10 text-yellow-700',
-    PATCH: 'bg-orange-500/10 text-orange-600',
-    DELETE: 'bg-red-500/10 text-red-600',
+    POST:    'bg-blue-500/10 text-blue-600',
+    GET:     'bg-green-500/10 text-green-600',
+    PUT:     'bg-yellow-500/10 text-yellow-700',
+    PATCH:   'bg-orange-500/10 text-orange-600',
+    DELETE:  'bg-red-500/10 text-red-600',
+    HEAD:    'bg-cyan-500/10 text-cyan-600',
+    OPTIONS: 'bg-muted text-muted-foreground',
   }
   return (
-    <Badge variant="outline" className={`text-xs font-mono ${colors[method] ?? ''}`}>
+    <Badge variant="outline" className={`text-xs font-mono shrink-0 ${colors[method] ?? ''}`}>
       {method}
     </Badge>
   )
@@ -109,6 +117,7 @@ export default function Webhooks() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [replayTarget, setReplayTarget] = useState<'ws' | 'url'>('ws')
   const [replayUrl, setReplayUrl] = useState('')
+  const [replayingId, setReplayingId] = useState<string | null>(null)
   const qc = useQueryClient()
 
   const { data: webhooks, isLoading } = useQuery({
@@ -144,6 +153,22 @@ export default function Webhooks() {
     onError: () => toast.error('Replay failed'),
   })
 
+  const quickReplayMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/webhooks/${id}/replay`, { target: 'ws' }),
+    onMutate: (id) => setReplayingId(id),
+    onSettled: () => setReplayingId(null),
+    onSuccess: (res, id) => {
+      const d = res.data
+      if (d.status === 'success') {
+        toast.success(`Replayed to ${d.forwarded ?? 1} client(s)`)
+      } else {
+        toast.error(`Replay failed${d.errorMsg ? `: ${d.errorMsg}` : ''}`)
+      }
+      qc.invalidateQueries({ queryKey: ['replays', id] })
+    },
+    onError: () => toast.error('Replay failed'),
+  })
+
   function handleReplay() {
     if (!selectedId) return
     replayMutation.mutate({
@@ -170,178 +195,205 @@ export default function Webhooks() {
     : detail?.body ?? ''
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Webhooks</h1>
-        <p className="text-muted-foreground text-sm">Received webhooks history</p>
-      </div>
+    <TooltipProvider>
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Webhooks</h1>
+          <p className="text-muted-foreground text-sm">Received webhooks history</p>
+        </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <div className="divide-y">
-            {isLoading && Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 p-4">
-                <Skeleton className="h-5 w-14" />
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-4 w-24 ml-auto" />
-              </div>
-            ))}
-            {!isLoading && webhooks?.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-10">
-                No webhooks received yet. Send a POST to <code>/hook/:token</code>
-              </p>
-            )}
-            {webhooks?.map((wh) => (
-              <div
-                key={wh.id}
-                className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 cursor-pointer transition-colors"
-                onClick={() => setSelectedId(wh.id)}
-              >
-                <MethodBadge method={wh.method} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium truncate">{wh.endpointName}</p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {wh.clientName} · {wh.sourceIp}
-                  </p>
+        <Card>
+          <CardContent className="p-0">
+            <div className="divide-y">
+              {isLoading && Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 p-4">
+                  <Skeleton className="h-5 w-14" />
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-4 w-24 ml-auto" />
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xs text-muted-foreground">
-                    {formatDistanceToNow(new Date(wh.receivedAt), { addSuffix: true })}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{(wh.sizeBytes / 1024).toFixed(1)} KB</p>
+              ))}
+              {!isLoading && webhooks?.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-10">
+                  No webhooks received yet. Send a POST to <code>/hook/:token</code>
+                </p>
+              )}
+              {webhooks?.map((wh) => (
+                <div
+                  key={wh.id}
+                  className="group flex items-center gap-3 px-4 py-3 hover:bg-muted/40 cursor-pointer transition-colors"
+                  onClick={() => setSelectedId(wh.id)}
+                >
+                  <MethodBadge method={wh.method} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{wh.endpointName}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {wh.clientName} · {wh.sourceIp}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs text-muted-foreground">
+                      {formatDistanceToNow(new Date(wh.receivedAt), { addSuffix: true })}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{(wh.sizeBytes / 1024).toFixed(1)} KB</p>
+                  </div>
+
+                  {/* Quick replay button */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          quickReplayMutation.mutate(wh.id)
+                        }}
+                        disabled={replayingId === wh.id}
+                      >
+                        {replayingId === wh.id
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : <RefreshCw className="h-3.5 w-3.5" />
+                        }
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">
+                      <p>Replay to WS clients</p>
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <Eye className="h-4 w-4 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
-                <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Detail dialog */}
-      <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {detail && <MethodBadge method={detail.method} />}
-              <span className="truncate">{detail?.endpointName}</span>
-            </DialogTitle>
-          </DialogHeader>
-
-          {loadingDetail ? (
-            <div className="space-y-3 flex-1">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-40 w-full" />
+              ))}
             </div>
-          ) : detail && (
-            <Tabs defaultValue="body" className="flex-1 flex flex-col min-h-0">
-              <TabsList className="shrink-0">
-                <TabsTrigger value="body">Body</TabsTrigger>
-                <TabsTrigger value="headers">Headers</TabsTrigger>
-                <TabsTrigger value="replay">Replay</TabsTrigger>
-                <TabsTrigger value="history">History ({replays?.length ?? 0})</TabsTrigger>
-              </TabsList>
+          </CardContent>
+        </Card>
 
-              <TabsContent value="body" className="flex-1 min-h-0">
-                <ScrollArea className="h-64 w-full border rounded-md bg-muted/30">
-                  {body ? (
-                    <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-all leading-relaxed">
-                      <JsonHighlight value={body} />
-                    </pre>
-                  ) : (
-                    <p className="p-4 text-xs text-muted-foreground italic">empty body</p>
-                  )}
-                </ScrollArea>
-                <div className="mt-3 flex gap-4 text-xs text-muted-foreground">
-                  <span>Received: {format(new Date(detail.receivedAt), 'PPpp')}</span>
-                  <span className="ml-auto">{detail.sourceIp} · {detail.sizeBytes} B</span>
-                </div>
-              </TabsContent>
+        {/* Detail dialog */}
+        <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
+          <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                {detail && <MethodBadge method={detail.method} />}
+                <span className="truncate">{detail?.endpointName}</span>
+              </DialogTitle>
+            </DialogHeader>
 
-              <TabsContent value="headers" className="flex-1 min-h-0">
-                <ScrollArea className="h-64 w-full border rounded-md">
-                  <table className="w-full text-xs">
-                    <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
-                      <tr>
-                        <th className="text-left font-medium text-muted-foreground px-3 py-2 w-2/5">Header</th>
-                        <th className="text-left font-medium text-muted-foreground px-3 py-2">Value</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {Object.entries(parsedHeaders).map(([k, v]) => (
-                        <tr key={k} className="hover:bg-muted/40">
-                          <td className="px-3 py-1.5 font-mono text-muted-foreground align-top whitespace-nowrap">{k}</td>
-                          <td className="px-3 py-1.5 font-mono break-all">{String(v)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </ScrollArea>
-              </TabsContent>
+            {loadingDetail ? (
+              <div className="space-y-3 flex-1">
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-40 w-full" />
+              </div>
+            ) : detail && (
+              <Tabs defaultValue="body" className="flex-1 flex flex-col min-h-0">
+                <TabsList className="shrink-0">
+                  <TabsTrigger value="body">Body</TabsTrigger>
+                  <TabsTrigger value="headers">Headers</TabsTrigger>
+                  <TabsTrigger value="replay">Replay</TabsTrigger>
+                  <TabsTrigger value="history">History ({replays?.length ?? 0})</TabsTrigger>
+                </TabsList>
 
-              <TabsContent value="replay" className="space-y-4">
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <Label>Target</Label>
-                    <Select value={replayTarget} onValueChange={(v: string) => setReplayTarget(v as 'ws' | 'url')}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ws">WebSocket clients (live)</SelectItem>
-                        <SelectItem value="url">External URL</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {replayTarget === 'url' && (
-                    <div className="space-y-1">
-                      <Label>URL</Label>
-                      <Input
-                        placeholder="https://example.com/webhook"
-                        value={replayUrl}
-                        onChange={(e) => setReplayUrl(e.target.value)}
-                      />
-                    </div>
-                  )}
-                  <Button
-                    onClick={handleReplay}
-                    disabled={replayMutation.isPending || (replayTarget === 'url' && !replayUrl)}
-                    className="w-full"
-                  >
-                    {replayMutation.isPending
-                      ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Replaying…</>
-                      : <><RefreshCw className="mr-2 h-4 w-4" /> Replay</>
-                    }
-                  </Button>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="history" className="flex-1 min-h-0">
-                <ScrollArea className="h-64">
-                  <div className="space-y-2">
-                    {replays?.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-4">No replays yet</p>
+                <TabsContent value="body" className="flex-1 min-h-0">
+                  <ScrollArea className="h-64 w-full border rounded-md bg-muted/30">
+                    {body ? (
+                      <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-all leading-relaxed">
+                        <JsonHighlight value={body} />
+                      </pre>
+                    ) : (
+                      <p className="p-4 text-xs text-muted-foreground italic">empty body</p>
                     )}
-                    {replays?.map((r) => (
-                      <div key={r.id} className="border rounded-md p-3 text-sm space-y-1">
-                        <div className="flex items-center gap-2">
-                          <StatusBadge status={r.status} />
-                          <Badge variant="outline" className="text-xs">{r.targetType}</Badge>
-                          {r.responseCode && <span className="text-xs text-muted-foreground">HTTP {r.responseCode}</span>}
-                          <span className="text-xs text-muted-foreground ml-auto">
-                            {formatDistanceToNow(new Date(r.createdAt), { addSuffix: true })}
-                          </span>
-                        </div>
-                        {r.targetUrl && <p className="text-xs text-muted-foreground truncate">{r.targetUrl}</p>}
-                        {r.errorMsg && <p className="text-xs text-destructive">{r.errorMsg}</p>}
-                      </div>
-                    ))}
+                  </ScrollArea>
+                  <div className="mt-3 flex gap-4 text-xs text-muted-foreground">
+                    <span>Received: {format(new Date(detail.receivedAt), 'PPpp')}</span>
+                    <span className="ml-auto">{detail.sourceIp} · {detail.sizeBytes} B</span>
                   </div>
-                </ScrollArea>
-              </TabsContent>
-            </Tabs>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+                </TabsContent>
+
+                <TabsContent value="headers" className="flex-1 min-h-0">
+                  <ScrollArea className="h-64 w-full border rounded-md">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                        <tr>
+                          <th className="text-left font-medium text-muted-foreground px-3 py-2 w-2/5">Header</th>
+                          <th className="text-left font-medium text-muted-foreground px-3 py-2">Value</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {Object.entries(parsedHeaders).map(([k, v]) => (
+                          <tr key={k} className="hover:bg-muted/40">
+                            <td className="px-3 py-1.5 font-mono text-muted-foreground align-top whitespace-nowrap">{k}</td>
+                            <td className="px-3 py-1.5 font-mono break-all">{String(v)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </ScrollArea>
+                </TabsContent>
+
+                <TabsContent value="replay" className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <Label>Target</Label>
+                      <Select value={replayTarget} onValueChange={(v: string) => setReplayTarget(v as 'ws' | 'url')}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ws">WebSocket clients (live)</SelectItem>
+                          <SelectItem value="url">External URL</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {replayTarget === 'url' && (
+                      <div className="space-y-1">
+                        <Label>URL</Label>
+                        <Input
+                          placeholder="https://example.com/webhook"
+                          value={replayUrl}
+                          onChange={(e) => setReplayUrl(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    <Button
+                      onClick={handleReplay}
+                      disabled={replayMutation.isPending || (replayTarget === 'url' && !replayUrl)}
+                      className="w-full"
+                    >
+                      {replayMutation.isPending
+                        ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Replaying…</>
+                        : <><RefreshCw className="mr-2 h-4 w-4" /> Replay</>
+                      }
+                    </Button>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="history" className="flex-1 min-h-0">
+                  <ScrollArea className="h-64">
+                    <div className="space-y-2">
+                      {replays?.length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-4">No replays yet</p>
+                      )}
+                      {replays?.map((r) => (
+                        <div key={r.id} className="border rounded-md p-3 text-sm space-y-1">
+                          <div className="flex items-center gap-2">
+                            <StatusBadge status={r.status} />
+                            <Badge variant="outline" className="text-xs">{r.targetType}</Badge>
+                            {r.responseCode && <span className="text-xs text-muted-foreground">HTTP {r.responseCode}</span>}
+                            <span className="text-xs text-muted-foreground ml-auto">
+                              {formatDistanceToNow(new Date(r.createdAt), { addSuffix: true })}
+                            </span>
+                          </div>
+                          {r.targetUrl && <p className="text-xs text-muted-foreground truncate">{r.targetUrl}</p>}
+                          {r.errorMsg && <p className="text-xs text-destructive">{r.errorMsg}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TooltipProvider>
   )
 }
