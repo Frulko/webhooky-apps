@@ -1,0 +1,176 @@
+#!/bin/bash
+# Fichier: scripts/release
+# Usage:   ./scripts/release [options]
+# Crée un tag semver sur main et le push pour déclencher le pipeline CI/CD.
+
+set -e
+
+MAIN_BRANCH="main"
+BUMP="patch"
+MANUAL_VERSION=""
+DRY_RUN=false
+
+# ── Parsing des arguments ────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            echo "Usage: ./scripts/release [options]"
+            echo ""
+            echo "Crée un tag semver sur main et le push → déclenche le pipeline GitHub Actions"
+            echo "(tests → npm publish → Docker Hub → Portainer)."
+            echo ""
+            echo "Options:"
+            echo "  --patch              Bump patch : v0.8.0 → v0.8.1  (défaut)"
+            echo "  --minor              Bump minor : v0.8.0 → v0.9.0"
+            echo "  --major              Bump major : v0.8.0 → v1.0.0"
+            echo "  --version X.Y.Z      Version manuelle exacte"
+            echo "  --dry-run            Affiche ce qui serait fait sans exécuter"
+            echo "  --list               Liste les 10 derniers tags"
+            echo "  -h, --help           Affiche cette aide"
+            echo ""
+            echo "Exemples:"
+            echo "  ./scripts/release                    # v0.8.0 → v0.8.1"
+            echo "  ./scripts/release --minor            # v0.8.0 → v0.9.0"
+            echo "  ./scripts/release --major            # v0.8.0 → v1.0.0"
+            echo "  ./scripts/release --version 1.0.0   # force v1.0.0"
+            echo "  ./scripts/release --dry-run          # simulation"
+            exit 0
+            ;;
+        --list)
+            echo "Dernières releases:"
+            git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -10
+            exit 0
+            ;;
+        --patch)  BUMP="patch";  shift ;;
+        --minor)  BUMP="minor";  shift ;;
+        --major)  BUMP="major";  shift ;;
+        --version)
+            if [ -z "$2" ]; then
+                echo "Erreur: --version requiert un argument (ex: --version 1.0.0)"
+                exit 1
+            fi
+            MANUAL_VERSION="$2"
+            shift 2
+            ;;
+        --dry-run) DRY_RUN=true; shift ;;
+        *)
+            echo "Option inconnue: $1"
+            echo "Utilisez './scripts/release --help' pour voir les options disponibles."
+            exit 1
+            ;;
+    esac
+done
+
+# ── Vérifications préliminaires ──────────────────────────────────────────────
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$CURRENT_BRANCH" != "$MAIN_BRANCH" ]; then
+    echo "Erreur: vous devez être sur '$MAIN_BRANCH' (branche actuelle: $CURRENT_BRANCH)"
+    exit 1
+fi
+
+if [ "$DRY_RUN" = false ] && { ! git diff --quiet || ! git diff --cached --quiet; }; then
+    echo "Erreur: working tree sale. Commitez ou stashez avant de relancer."
+    exit 1
+fi
+
+# ── Sync avec le remote ──────────────────────────────────────────────────────
+echo "Synchronisation avec le remote..."
+git fetch origin --tags --quiet
+
+# ── Détection du dernier tag ─────────────────────────────────────────────────
+LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+
+if [ -z "$LAST_TAG" ]; then
+    echo "Erreur: aucun tag semver vX.Y.Z trouvé."
+    echo "   Créez un premier tag avec: git tag v0.1.0"
+    exit 1
+fi
+
+CURRENT_VERSION="${LAST_TAG#v}"
+MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+
+# ── Calcul de la nouvelle version ────────────────────────────────────────────
+if [ -n "$MANUAL_VERSION" ]; then
+    NEW_VERSION="$MANUAL_VERSION"
+else
+    case "$BUMP" in
+        major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+        minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+        patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+    esac
+fi
+
+NEW_TAG="v${NEW_VERSION}"
+
+# ── Vérification que le tag n'existe pas déjà ────────────────────────────────
+if git tag -l "$NEW_TAG" | grep -q "$NEW_TAG"; then
+    echo "Erreur: le tag $NEW_TAG existe déjà localement."
+    exit 1
+fi
+
+if git ls-remote --tags origin "refs/tags/$NEW_TAG" | grep -q "$NEW_TAG"; then
+    echo "Erreur: le tag $NEW_TAG existe déjà sur le remote."
+    exit 1
+fi
+
+# ── Résumé ───────────────────────────────────────────────────────────────────
+echo ""
+echo "┌─────────────────────────────────────┐"
+echo "│            hooky release            │"
+echo "├─────────────────────────────────────┤"
+printf "│  Version actuelle : %-15s │\n" "$LAST_TAG"
+printf "│  Nouvelle version : %-15s │\n" "$NEW_TAG"
+if [ -n "$MANUAL_VERSION" ]; then
+    printf "│  Mode             : %-15s │\n" "manuelle"
+else
+    printf "│  Mode             : bump %-10s │\n" "$BUMP"
+fi
+echo "└─────────────────────────────────────┘"
+echo ""
+
+if [ "$DRY_RUN" = true ]; then
+    echo "Dry run — aucune modification effectuée."
+    echo ""
+    echo "Commandes qui seraient exécutées :"
+    echo "  git pull origin $MAIN_BRANCH"
+    echo "  git tag $NEW_TAG"
+    echo "  git push --tags"
+    exit 0
+fi
+
+# ── Confirmation ─────────────────────────────────────────────────────────────
+printf "Confirmer la release %s ? Tapez 'yes' pour continuer : " "$NEW_TAG"
+read -r CONFIRM
+if [ "$CONFIRM" != "yes" ]; then
+    echo "Release annulée."
+    exit 1
+fi
+echo ""
+
+# ── Mise à jour de main ──────────────────────────────────────────────────────
+echo "Mise à jour de $MAIN_BRANCH..."
+git pull origin "$MAIN_BRANCH"
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "Erreur: working tree sale après le pull."
+    exit 1
+fi
+
+# ── Tag + push ───────────────────────────────────────────────────────────────
+echo "Création du tag $NEW_TAG..."
+git tag "$NEW_TAG"
+
+echo "Push du tag..."
+if ! git push --tags; then
+    echo "Erreur: push du tag échoué — rollback."
+    git tag -d "$NEW_TAG" 2>/dev/null || true
+    exit 1
+fi
+
+echo ""
+echo "Release $NEW_TAG créée et pushée."
+echo "Pipeline GitHub Actions en cours : github.com/Frulko/webhooky-apps/actions"
+echo ""
+echo "  tests → npm publish $NEW_VERSION → Docker frulko/webhooky:$NEW_VERSION → Portainer"
