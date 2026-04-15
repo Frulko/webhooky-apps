@@ -47,7 +47,6 @@ async function forwardWebhook(wh, forward, tag = '') {
       headers: forwardHeaders,
       body: hasBody ? body : undefined,
       signal: AbortSignal.timeout(10000),
-      dispatcher: insecureDispatcher,
     })
 
     const color = res.ok ? chalk.green : chalk.red
