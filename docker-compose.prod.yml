@@ -18,7 +18,7 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - internal
+      - hooky_net
     deploy:
       restart_policy:
         condition: on-failure
@@ -38,7 +38,7 @@ services:
       HOST: ${HOST:-0.0.0.0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     networks:
-      - internal
+      - hooky_net
     deploy:
       restart_policy:
         condition: on-failure
@@ -47,6 +47,6 @@ volumes:
   pgdata:
 
 networks:
-  internal:
+  hooky_net:
     driver: overlay
     attachable: true
