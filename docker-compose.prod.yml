@@ -1,16 +1,11 @@
 version: '3.9'
 
-# Production compose — uses pre-built image from Docker Hub.
-# Override the image tag via DOCKER_IMAGE, e.g.:
-#   DOCKER_IMAGE=frulko/webhooky:0.6.0
-#
-# Usage:
-#   docker compose -f docker-compose.prod.yml up -d
+# Production stack — Docker Swarm (Portainer).
+# Set environment variables via Portainer's stack env UI.
 
 services:
   postgres:
     image: postgres:16-alpine
-    restart: unless-stopped
     environment:
       POSTGRES_USER: webhook
       POSTGRES_PASSWORD: webhook
@@ -24,10 +19,12 @@ services:
       retries: 10
     networks:
       - internal
+    deploy:
+      restart_policy:
+        condition: on-failure
 
   server:
     image: ${DOCKER_IMAGE:-frulko/webhooky:latest}
-    restart: unless-stopped
     ports:
       - '3000:3000'
     environment:
@@ -40,14 +37,16 @@ services:
       PORT: ${PORT:-3000}
       HOST: ${HOST:-0.0.0.0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-    depends_on:
-      - postgres
     networks:
       - internal
+    deploy:
+      restart_policy:
+        condition: on-failure
 
 volumes:
   pgdata:
 
 networks:
   internal:
-    driver: bridge
+    driver: overlay
+    attachable: true
