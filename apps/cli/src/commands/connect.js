@@ -2,8 +2,56 @@ import WebSocket from 'ws'
 import chalk from 'chalk'
 import { confirm } from '@inquirer/prompts'
 import { load, save, merge } from '../config.js'
-import { listClients, listEndpoints, requestConnectToken } from '../api.js'
+import { listClients, listEndpoints, requestConnectToken, listMissedWebhooks } from '../api.js'
 import { select, input } from '@inquirer/prompts'
+
+const MAX_RECONNECTS = 10
+
+const HOP_BY_HOP = new Set([
+  'host', 'connection', 'keep-alive', 'transfer-encoding',
+  'te', 'trailer', 'upgrade', 'proxy-authorization', 'content-length',
+])
+
+async function forwardWebhook(wh, forward, tag = '') {
+  const ts = new Date().toLocaleTimeString()
+  console.log(`  ${chalk.dim(ts)} ${chalk.blue(wh.method ?? 'POST')}${tag} ${chalk.dim('→')} ${forward}`)
+
+  try {
+    const body = typeof wh.body === 'object' ? JSON.stringify(wh.body) : (wh.body || undefined)
+    const hasBody = body !== undefined && body !== null && body !== ''
+
+    // Append query params to forward URL
+    let forwardUrl = forward
+    const qp = wh.query_params ?? wh.queryParams
+    if (qp && typeof qp === 'object' && Object.keys(qp).length > 0) {
+      const u = new URL(forward)
+      for (const [k, v] of Object.entries(qp)) u.searchParams.set(k, v)
+      forwardUrl = u.toString()
+    }
+
+    // Forward original headers, strip hop-by-hop
+    const headers = wh.headers ?? {}
+    const parsedHeaders = typeof headers === 'string' ? JSON.parse(headers) : headers
+    const forwardHeaders = {}
+    for (const [k, v] of Object.entries(parsedHeaders)) {
+      if (!HOP_BY_HOP.has(k.toLowerCase())) forwardHeaders[k] = v
+    }
+    forwardHeaders['x-webhook-id'] = wh.id
+    forwardHeaders['x-forwarded-by'] = 'hooky'
+
+    const res = await fetch(forwardUrl, {
+      method: wh.method ?? 'POST',
+      headers: forwardHeaders,
+      body: hasBody ? body : undefined,
+      signal: AbortSignal.timeout(10000),
+    })
+
+    const color = res.ok ? chalk.green : chalk.red
+    console.log(`          ${color(`→ ${res.status} ${res.statusText}`)}`)
+  } catch (err) {
+    console.log(`          ${chalk.red(`✗ ${err.message}`)}`)
+  }
+}
 
 async function pickEndpoint(cfg) {
   let clients
@@ -157,7 +205,9 @@ export async function connect(flags) {
 
   let ws
   let reconnectDelay = 1000
+  let reconnectAttempts = 0
   let pingInterval
+  let disconnectedAt = null
 
   async function doConnect() {
     let connectToken
@@ -171,9 +221,28 @@ export async function connect(flags) {
     const fullUrl = `${wsBase}/ws/${token}?t=${connectToken}`
     ws = new WebSocket(fullUrl)
 
-    ws.on('open', () => {
+    ws.on('open', async () => {
       console.log(chalk.green('  ✓ Connected'))
+
+      // Catch up on webhooks missed during the disconnection window
+      if (disconnectedAt && cfg?.endpoint?.id && cfg?.auth?.token) {
+        try {
+          const missed = await listMissedWebhooks(cfg, cfg.endpoint.id, disconnectedAt)
+          if (missed.length > 0) {
+            console.log(chalk.yellow(`\n  ↻ ${missed.length} webhook(s) received while disconnected — replaying…`))
+            for (const wh of missed) {
+              await forwardWebhook(wh, forward, chalk.yellow(' [missed]'))
+            }
+            console.log()
+          }
+        } catch (err) {
+          console.log(chalk.dim(`  ↻ Could not fetch missed webhooks: ${err.message}`))
+        }
+        disconnectedAt = null
+      }
+
       reconnectDelay = 1000
+      reconnectAttempts = 0
       pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
       }, 30000)
@@ -190,60 +259,31 @@ export async function connect(flags) {
       }
 
       if (msg.type === 'webhook' || msg.type === 'replay') {
-        const wh = msg.webhook
         const tag = msg.type === 'replay' ? chalk.yellow(' [replay]') : ''
-        const ts = new Date().toLocaleTimeString()
-
-        console.log(`  ${chalk.dim(ts)} ${chalk.blue(wh.method ?? 'POST')}${tag} ${chalk.dim('→')} ${forward}`)
-
-        try {
-          const body = typeof wh.body === 'object' ? JSON.stringify(wh.body) : (wh.body || undefined)
-          const contentType = wh.headers?.['content-type'] ?? 'application/json'
-          const hasBody = body !== undefined && body !== null && body !== ''
-
-          // Append query params to forward URL
-          let forwardUrl = forward
-          const qp = wh.query_params
-          if (qp && typeof qp === 'object' && Object.keys(qp).length > 0) {
-            const u = new URL(forward)
-            for (const [k, v] of Object.entries(qp)) u.searchParams.set(k, v)
-            forwardUrl = u.toString()
-          }
-
-          // Forward original headers, strip hop-by-hop headers
-          const HOP_BY_HOP = new Set([
-            'host', 'connection', 'keep-alive', 'transfer-encoding',
-            'te', 'trailer', 'upgrade', 'proxy-authorization', 'content-length',
-          ])
-          const forwardHeaders = {}
-          for (const [k, v] of Object.entries(wh.headers ?? {})) {
-            if (!HOP_BY_HOP.has(k.toLowerCase())) forwardHeaders[k] = v
-          }
-          forwardHeaders['x-webhook-id'] = wh.id
-          forwardHeaders['x-forwarded-by'] = 'hooky'
-
-          const res = await fetch(forwardUrl, {
-            method: wh.method ?? 'POST',
-            headers: forwardHeaders,
-            body: hasBody ? body : undefined,
-            signal: AbortSignal.timeout(10000),
-          })
-
-          const color = res.ok ? chalk.green : chalk.red
-          console.log(`          ${color(`→ ${res.status} ${res.statusText}`)}`)
-        } catch (err) {
-          console.log(`          ${chalk.red(`✗ ${err.message}`)}`)
-        }
+        await forwardWebhook(msg.webhook, forward, tag)
       }
     })
 
     ws.on('close', (code) => {
       clearInterval(pingInterval)
+
       if (code === 1008) {
         console.error(chalk.red('  ✗ Authentication failed — check your token and API key'))
         process.exit(1)
       }
-      console.log(chalk.dim(`  ↻ Disconnected. Reconnecting in ${reconnectDelay / 1000}s…`))
+
+      disconnectedAt = new Date().toISOString()
+      reconnectAttempts++
+
+      if (reconnectAttempts > MAX_RECONNECTS) {
+        console.error(chalk.red(`\n  ✗ Failed to reconnect after ${MAX_RECONNECTS} attempts.`))
+        console.error(chalk.dim('  Run `hooky connect` to retry.\n'))
+        process.exit(1)
+      }
+
+      console.log(chalk.dim(
+        `  ↻ Disconnected (attempt ${reconnectAttempts}/${MAX_RECONNECTS}). Reconnecting in ${reconnectDelay / 1000}s…`
+      ))
       setTimeout(() => {
         reconnectDelay = Math.min(reconnectDelay * 2, 30000)
         doConnect().catch((err) => {

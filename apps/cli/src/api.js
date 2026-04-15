@@ -54,6 +54,13 @@ export async function listEndpoints(server, token, clientId) {
   return res.json()
 }
 
+export async function listMissedWebhooks(cfg, endpointId, since) {
+  const params = new URLSearchParams({ endpointId, since, full: '1', limit: '50' })
+  const res = await authedFetch(cfg, `/api/webhooks?${params}`)
+  if (!res.ok) throw new Error('Failed to fetch missed webhooks')
+  return res.json()
+}
+
 export async function requestConnectToken(cfg, endpointToken, apiKey) {
   const res = await authedFetch(cfg, '/api/ws-token', {
     method: 'POST',

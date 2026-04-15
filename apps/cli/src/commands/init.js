@@ -12,11 +12,14 @@ export async function init() {
   let server, email, pass, authData
 
   try {
-    const rawUrl = await input({
+    const rawUrl = (await input({
       message: 'Dashboard URL',
       default: saved.server ?? 'http://localhost:3000',
-      validate: (v) => { try { new URL(v); return true } catch { return 'Enter a valid URL' } },
-    })
+      validate: (v) => {
+        const trimmed = v.trim()
+        try { new URL(trimmed); return true } catch { return 'Enter a valid URL' }
+      },
+    })).trim()
 
     // In dev, Vite runs on :5173 but the API is on :3000.
     // In production they're the same domain — use as-is.
