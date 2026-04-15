@@ -7,42 +7,70 @@ import {
   statSync,
   existsSync,
   unlinkSync,
+  copyFileSync,
 } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { join, dirname } from 'node:path'
+import chalk from 'chalk'
 
 function configPath() {
-  if (process.env.HOOKY_CONFIG) {
-    return process.env.HOOKY_CONFIG
-  }
+  if (process.env.HOOKY_CONFIG) return process.env.HOOKY_CONFIG
   const home = homedir()
   const plat = platform()
-  let dir
   if (plat === 'win32') {
-    dir = join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'hooky', 'Config')
-  } else if (plat === 'darwin') {
-    dir = join(home, 'Library', 'Application Support', 'hooky')
-  } else {
-    dir = join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'hooky')
+    return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'webhooky', 'config.json')
   }
-  return join(dir, 'config.json')
+  // ~/.config/webhooky on all Unix platforms
+  return join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'webhooky', 'config.json')
+}
+
+// Old locations used before v0.7.17
+function legacyConfigPath() {
+  if (process.env.HOOKY_CONFIG) return null
+  const home = homedir()
+  const plat = platform()
+  if (plat === 'win32') return null
+  if (plat === 'darwin') {
+    return join(home, 'Library', 'Application Support', 'hooky', 'config.json')
+  }
+  return join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'hooky', 'config.json')
 }
 
 export const CONFIG_PATH = configPath()
 
 export function load() {
-  if (!existsSync(CONFIG_PATH)) return null
+  // Auto-migrate from legacy path if new path doesn't exist yet
+  if (!existsSync(CONFIG_PATH)) {
+    const legacy = legacyConfigPath()
+    if (legacy && existsSync(legacy)) {
+      try {
+        const dir = dirname(CONFIG_PATH)
+        mkdirSync(dir, { recursive: true, mode: 0o700 })
+        if (platform() !== 'win32') { try { chmodSync(dir, 0o700) } catch {} }
+        copyFileSync(legacy, CONFIG_PATH)
+        if (platform() !== 'win32') { try { chmodSync(CONFIG_PATH, 0o600) } catch {} }
+        unlinkSync(legacy)
+        console.log(`  ${chalk.dim(`Config migrated to ${CONFIG_PATH}`)}`)
+      } catch {
+        // Migration failed silently — legacy path will still be read below
+      }
+    }
+  }
+
+  const pathToRead = existsSync(CONFIG_PATH) ? CONFIG_PATH : (legacyConfigPath() ?? CONFIG_PATH)
+  if (!existsSync(pathToRead)) return null
+
   // Warn if world-readable on Unix
   if (platform() !== 'win32') {
     try {
-      const mode = statSync(CONFIG_PATH).mode
+      const mode = statSync(pathToRead).mode
       if ((mode & 0o077) !== 0) {
-        console.warn(`  Warning: config file is world-readable. Run: chmod 600 "${CONFIG_PATH}"`)
+        console.warn(`  Warning: config file is world-readable. Run: chmod 600 "${pathToRead}"`)
       }
     } catch {}
   }
   try {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))
+    return JSON.parse(readFileSync(pathToRead, 'utf8'))
   } catch {
     return null
   }

@@ -60,20 +60,17 @@ export async function update() {
   console.log(`  ${chalk.yellow('↑')} Update available: ${chalk.dim(current)} → ${chalk.green(latest)}`)
   console.log()
 
-  // Detect package manager used to install hooky
-  let pm = 'npm'
   try {
-    const npmRoot = execSync('npm root -g', { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim()
-    if (npmRoot) pm = 'npm'
-  } catch {}
-
-  try {
-    execSync(`${pm} install -g webhooky@latest`, { stdio: 'inherit' })
+    // Remove first to avoid stale cached files, then reinstall clean
+    process.stdout.write(`  ${chalk.dim('Removing old version…')}\n`)
+    execSync('npm remove -g webhooky', { stdio: 'pipe' })
+    process.stdout.write(`  ${chalk.dim(`Installing webhooky@${latest}…`)}\n`)
+    execSync(`npm install -g webhooky@${latest}`, { stdio: 'inherit' })
     console.log()
     console.log(`  ${chalk.green('✓')} Updated to ${chalk.bold(latest)}`)
   } catch {
     console.log(`  ${chalk.red('✗')} Update failed. Try manually:`)
-    console.log(`  ${chalk.dim('$')} npm install -g webhooky@latest`)
+    console.log(`  ${chalk.dim('$')} npm remove -g webhooky && npm install -g webhooky@latest`)
   }
 
   console.log()
