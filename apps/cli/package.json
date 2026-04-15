@@ -1,6 +1,6 @@
 {
   "name": "webhooky",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Forward webhooks to your localhost — CLI client for hooky",
   "type": "module",
   "bin": {
