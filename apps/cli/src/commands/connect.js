@@ -72,10 +72,20 @@ async function forwardWebhook(wh, forward, tag = '') {
     const color = res.ok ? chalk.green : chalk.red
     console.log(`          ${color(`→ ${res.status} ${res.statusText}`)}`)
   } catch (err) {
-    console.log(`          ${chalk.red(`✗ ${err.message}`)}`)
+    // Unwrap cause chain — Node fetch wraps the real error in err.cause
+    const causes = []
+    let cur = err
+    while (cur) {
+      causes.push(cur)
+      cur = cur.cause
+    }
+    const root = causes[causes.length - 1]
+    const detail = root !== err ? ` (${root.message})` : ''
+    console.log(`          ${chalk.red(`✗ ${err.message}${detail}`)}`)
     if (debugMode) {
-      dbg(`error code:  ${err.code ?? '(none)'}`)
-      dbg(`error cause: ${err.cause?.message ?? err.cause ?? '(none)'}`)
+      causes.forEach((c, i) => {
+        dbg(`cause[${i}] ${c.code ? chalk.yellow(c.code) + ' ' : ''}${c.message}`)
+      })
       dbg('stack:', err.stack)
     }
   }
