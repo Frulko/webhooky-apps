@@ -80,22 +80,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ── Deploy to server via SSH ────────────────────────────────────────────────
+  # ── Trigger Portainer redeploy via webhook ─────────────────────────────────
   deploy:
-    name: Deploy to server
+    name: Deploy via Portainer
     needs: build-push-docker
     runs-on: ubuntu-latest
 
     steps:
-      - name: SSH deploy
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            cd ${{ secrets.DEPLOY_PATH }}
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-            docker image prune -f
+      - name: Trigger Portainer webhook
+        run: |
+          curl -fsSL -X POST "${{ secrets.PORTAINER_WEBHOOK_URL }}"
