@@ -210,13 +210,21 @@ export async function connect(flags) {
             forwardUrl = u.toString()
           }
 
+          // Forward original headers, strip hop-by-hop headers
+          const HOP_BY_HOP = new Set([
+            'host', 'connection', 'keep-alive', 'transfer-encoding',
+            'te', 'trailer', 'upgrade', 'proxy-authorization', 'content-length',
+          ])
+          const forwardHeaders = {}
+          for (const [k, v] of Object.entries(wh.headers ?? {})) {
+            if (!HOP_BY_HOP.has(k.toLowerCase())) forwardHeaders[k] = v
+          }
+          forwardHeaders['x-webhook-id'] = wh.id
+          forwardHeaders['x-forwarded-by'] = 'hooky'
+
           const res = await fetch(forwardUrl, {
             method: wh.method ?? 'POST',
-            headers: {
-              ...(hasBody ? { 'content-type': contentType } : {}),
-              'x-webhook-id': wh.id,
-              'x-forwarded-by': 'hooky',
-            },
+            headers: forwardHeaders,
             body: hasBody ? body : undefined,
             signal: AbortSignal.timeout(10000),
           })

@@ -180,23 +180,35 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     exit 1
 fi
 
-# ── Bump package.json ────────────────────────────────────────────────────────
+# ── Détection des changements CLI depuis le dernier tag ──────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLI_PKG="$SCRIPT_DIR/../apps/cli/package.json"
 
-echo "Mise à jour de apps/cli/package.json → $NEW_VERSION..."
-npm version --no-git-tag-version "$NEW_VERSION" --prefix "$(dirname "$CLI_PKG")" > /dev/null
-git add "$CLI_PKG"
-git commit -m "chore(release): bump cli version to $NEW_VERSION"
+CLI_CHANGED=false
+CLI_DIFF=$(git diff "$LAST_TAG"..HEAD -- apps/cli/src apps/cli/bin apps/cli/package.json 2>/dev/null | \
+    grep -v '^--- \|^+++ \|^@@ ' | grep -v '"version"' | grep '^[+-]' || true)
+if [ -n "$CLI_DIFF" ]; then
+    CLI_CHANGED=true
+fi
+
+if [ "$CLI_CHANGED" = true ]; then
+    echo "CLI modifiée — bump apps/cli/package.json → $NEW_VERSION"
+    npm version --no-git-tag-version "$NEW_VERSION" --prefix "$(dirname "$CLI_PKG")" > /dev/null
+    git add "$CLI_PKG"
+    git commit -m "chore(release): bump cli version to $NEW_VERSION"
+else
+    echo "CLI inchangée — npm publish ignoré"
+fi
 
 # ── Tag + push ───────────────────────────────────────────────────────────────
 echo "Création du tag $NEW_TAG..."
 git tag "$NEW_TAG"
 
 echo "Push..."
+COMMITS_PUSHED=$( [ "$CLI_CHANGED" = true ] && echo 1 || echo 0 )
 if ! git push origin "$MAIN_BRANCH" --tags; then
     echo "Erreur: push échoué — rollback."
-    git reset --hard HEAD~1
+    [ "$COMMITS_PUSHED" = "1" ] && git reset --hard HEAD~1
     git tag -d "$NEW_TAG" 2>/dev/null || true
     exit 1
 fi
@@ -205,4 +217,8 @@ echo ""
 echo "Release $NEW_TAG créée et pushée."
 echo "Pipeline GitHub Actions en cours : github.com/Frulko/webhooky-apps/actions"
 echo ""
-echo "  tests → npm publish $NEW_VERSION → Docker frulko/webhooky:$NEW_VERSION → Portainer"
+if [ "$CLI_CHANGED" = true ]; then
+    echo "  tests → npm publish $NEW_VERSION → Docker frulko/webhooky:$NEW_VERSION → Portainer"
+else
+    echo "  tests → Docker frulko/webhooky:$NEW_VERSION → Portainer  (npm skipped)"
+fi
