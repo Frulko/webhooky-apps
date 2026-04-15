@@ -13,12 +13,12 @@ await migrate()
 
 // Mark sessions that were open when the previous server instance died as disconnected.
 // On a clean shutdown the ws.on('close') handler does this; on a crash/restart it doesn't.
-const { count } = await sql`
+const stale = await sql`
   UPDATE ws_sessions SET disconnected_at = NOW()
   WHERE disconnected_at IS NULL
-  RETURNING count(*)::int AS count
-`.then((rows) => rows[0] ?? { count: 0 })
-if (count > 0) console.log(`Cleaned up ${count} stale WS session(s) from previous instance.`)
+  RETURNING id
+`
+if (stale.length > 0) console.log(`Cleaned up ${stale.length} stale WS session(s) from previous instance.`)
 
 const app = await buildApp()
 
