@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -6,12 +6,24 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -27,7 +39,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { RefreshCw, Eye, Loader2, Copy, Check, Terminal } from 'lucide-react'
+import {
+  RefreshCw, Eye, Loader2, Copy, Check, Terminal,
+  Trash2, StickyNote, ChevronRight, ChevronDown,
+} from 'lucide-react'
 import api from '@/lib/api'
 import { formatDistanceToNow, format } from 'date-fns'
 import { toast } from 'sonner'
@@ -42,6 +57,7 @@ interface Webhook {
   sourceIp: string
   sizeBytes: number
   receivedAt: string
+  note?: string | null
 }
 
 interface WebhookDetail extends Webhook {
@@ -73,13 +89,11 @@ interface Delivery {
   sessionConnectedAt: string | null
 }
 
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
 function JsonHighlight({ value }: { value: string }) {
   let parsed: unknown
-  try {
-    parsed = JSON.parse(value)
-  } catch {
-    return <>{value}</>
-  }
+  try { parsed = JSON.parse(value) } catch { return <>{value}</> }
 
   const highlighted = JSON.stringify(parsed, null, 2).replace(
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
@@ -95,9 +109,8 @@ function JsonHighlight({ value }: { value: string }) {
         cls = 'text-rose-500 dark:text-rose-400'
       }
       return `<span class="${cls}">${match}</span>`
-    }
+    },
   )
-
   return <span dangerouslySetInnerHTML={{ __html: highlighted }} />
 }
 
@@ -171,25 +184,67 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
   )
 }
 
+// ─── main component ───────────────────────────────────────────────────────────
+
 export default function Webhooks() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [replayTarget, setReplayTarget] = useState<'ws' | 'url'>('ws')
   const [replayUrl, setReplayUrl] = useState('')
   const [replayingId, setReplayingId] = useState<string | null>(null)
   const [curlTarget, setCurlTarget] = useState('http://localhost:3000/webhook')
+
+  // selection
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
+  const [confirmDelete, setConfirmDelete] = useState<'single' | 'bulk' | null>(null)
+  const [deleteSingleId, setDeleteSingleId] = useState<string | null>(null)
+
+  // collapsed endpoint groups
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
+  // note editing state (local to dialog)
+  const [noteValue, setNoteValue] = useState('')
+  const [noteSaved, setNoteSaved] = useState(false)
+
   const qc = useQueryClient()
 
   const { data: webhooks, isLoading } = useQuery({
     queryKey: ['webhooks'],
-    queryFn: () => api.get('/webhooks?limit=100').then((r) => r.data as Webhook[]),
+    queryFn: () => api.get('/webhooks?limit=200').then((r) => r.data as Webhook[]),
     refetchInterval: 8000,
   })
+
+  // group by endpoint
+  const groups = useMemo(() => {
+    if (!webhooks) return []
+    const map = new Map<string, { endpointId: string; endpointName: string; clientName: string; items: Webhook[] }>()
+    for (const wh of webhooks) {
+      if (!map.has(wh.endpointId)) {
+        map.set(wh.endpointId, {
+          endpointId: wh.endpointId,
+          endpointName: wh.endpointName,
+          clientName: wh.clientName,
+          items: [],
+        })
+      }
+      map.get(wh.endpointId)!.items.push(wh)
+    }
+    return Array.from(map.values())
+  }, [webhooks])
 
   const { data: detail, isLoading: loadingDetail } = useQuery({
     queryKey: ['webhook', selectedId],
     queryFn: () => api.get(`/webhooks/${selectedId}`).then((r) => r.data as WebhookDetail),
     enabled: !!selectedId,
   })
+
+  // sync note value when detail loads
+  const openDetail = (id: string) => {
+    setSelectedId(id)
+    setNoteSaved(false)
+  }
+
+  // when detail changes reset note field
+  const currentNote = detail?.note ?? ''
 
   const { data: replays } = useQuery({
     queryKey: ['replays', selectedId],
@@ -204,16 +259,15 @@ export default function Webhooks() {
     refetchInterval: 5000,
   })
 
+  // ── mutations ───────────────────────────────────────────────────────────────
+
   const replayMutation = useMutation({
     mutationFn: (vars: { id: string; target: string; url?: string }) =>
       api.post(`/webhooks/${vars.id}/replay`, { target: vars.target, url: vars.url }),
     onSuccess: (res) => {
       const d = res.data
-      if (d.status === 'success') {
-        toast.success(`Replayed — ${d.forwarded ?? 1} client(s) reached`)
-      } else {
-        toast.error(`Replay failed${d.errorMsg ? `: ${d.errorMsg}` : ''}`)
-      }
+      if (d.status === 'success') toast.success(`Replayed — ${d.forwarded ?? 1} client(s) reached`)
+      else toast.error(`Replay failed${d.errorMsg ? `: ${d.errorMsg}` : ''}`)
       qc.invalidateQueries({ queryKey: ['replays', selectedId] })
     },
     onError: () => toast.error('Replay failed'),
@@ -225,122 +279,290 @@ export default function Webhooks() {
     onSettled: () => setReplayingId(null),
     onSuccess: (res, id) => {
       const d = res.data
-      if (d.status === 'success') {
-        toast.success(`Replayed to ${d.forwarded ?? 1} client(s)`)
-      } else {
-        toast.error(`Replay failed${d.errorMsg ? `: ${d.errorMsg}` : ''}`)
-      }
+      if (d.status === 'success') toast.success(`Replayed to ${d.forwarded ?? 1} client(s)`)
+      else toast.error(`Replay failed${d.errorMsg ? `: ${d.errorMsg}` : ''}`)
       qc.invalidateQueries({ queryKey: ['replays', id] })
     },
     onError: () => toast.error('Replay failed'),
   })
 
-  function handleReplay() {
-    if (!selectedId) return
-    replayMutation.mutate({
-      id: selectedId,
-      target: replayTarget,
-      url: replayTarget === 'url' ? replayUrl : undefined,
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/webhooks/${id}`),
+    onSuccess: (_, id) => {
+      toast.success('Webhook deleted')
+      if (selectedId === id) setSelectedId(null)
+      setCheckedIds((prev) => { const next = new Set(prev); next.delete(id); return next })
+      qc.invalidateQueries({ queryKey: ['webhooks'] })
+    },
+    onError: () => toast.error('Delete failed'),
+  })
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => api.post('/webhooks/bulk-delete', { ids }),
+    onSuccess: (res) => {
+      toast.success(`${res.data.deleted} webhook(s) deleted`)
+      setCheckedIds(new Set())
+      if (selectedId && checkedIds.has(selectedId)) setSelectedId(null)
+      qc.invalidateQueries({ queryKey: ['webhooks'] })
+    },
+    onError: () => toast.error('Bulk delete failed'),
+  })
+
+  const noteMutation = useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) =>
+      api.patch(`/webhooks/${id}`, { note: note || null }),
+    onSuccess: (_, { note }) => {
+      setNoteSaved(true)
+      setTimeout(() => setNoteSaved(false), 2000)
+      // update cached list
+      qc.setQueryData(['webhooks'], (old: Webhook[] | undefined) =>
+        old?.map((w) => w.id === selectedId ? { ...w, note: note || null } : w),
+      )
+      qc.invalidateQueries({ queryKey: ['webhook', selectedId] })
+    },
+    onError: () => toast.error('Failed to save note'),
+  })
+
+  // ── helpers ─────────────────────────────────────────────────────────────────
+
+  function toggleCheck(id: string, checked: boolean) {
+    setCheckedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
     })
   }
 
+  function toggleGroup(_endpointId: string, allIds: string[], checked: boolean) {
+    setCheckedIds((prev) => {
+      const next = new Set(prev)
+      allIds.forEach((id) => checked ? next.add(id) : next.delete(id))
+      return next
+    })
+  }
+
+  function toggleCollapse(endpointId: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(endpointId)) next.delete(endpointId)
+      else next.add(endpointId)
+      return next
+    })
+  }
+
+  function handleReplay() {
+    if (!selectedId) return
+    replayMutation.mutate({ id: selectedId, target: replayTarget, url: replayTarget === 'url' ? replayUrl : undefined })
+  }
+
+  function confirmDeleteSingle(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    setDeleteSingleId(id)
+    setConfirmDelete('single')
+  }
+
   const parsedHeaders = detail
-    ? typeof detail.headers === 'string'
-      ? JSON.parse(detail.headers)
-      : (detail.headers ?? {})
+    ? typeof detail.headers === 'string' ? JSON.parse(detail.headers) : (detail.headers ?? {})
     : {}
 
   const rawBodyParsed = detail?.bodyParsed
-    ? typeof detail.bodyParsed === 'string'
-      ? JSON.parse(detail.bodyParsed)
-      : detail.bodyParsed
+    ? typeof detail.bodyParsed === 'string' ? JSON.parse(detail.bodyParsed) : detail.bodyParsed
     : null
 
-  const body = rawBodyParsed
-    ? JSON.stringify(rawBodyParsed, null, 2)
-    : detail?.body ?? ''
+  const body = rawBodyParsed ? JSON.stringify(rawBodyParsed, null, 2) : detail?.body ?? ''
+
+  const checkedCount = checkedIds.size
+
+  // ── render ──────────────────────────────────────────────────────────────────
 
   return (
     <TooltipProvider>
       <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Webhooks</h1>
-          <p className="text-muted-foreground text-sm">Received webhooks history</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold">Webhooks</h1>
+            <p className="text-muted-foreground text-sm">Received webhooks history — grouped by endpoint</p>
+          </div>
+          {checkedCount > 0 && (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setConfirmDelete('bulk')}
+              disabled={bulkDeleteMutation.isPending}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete selected ({checkedCount})
+            </Button>
+          )}
         </div>
 
+        {/* ── table ─────────────────────────────────────────── */}
         <Card>
           <CardContent className="p-0">
-            <div className="divide-y">
-              {isLoading && Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 p-4">
-                  <Skeleton className="h-5 w-14" />
-                  <Skeleton className="h-4 w-40" />
-                  <Skeleton className="h-4 w-24 ml-auto" />
-                </div>
-              ))}
-              {!isLoading && webhooks?.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-10">
-                  No webhooks received yet. Send a POST to <code>/hook/:token</code>
-                </p>
-              )}
-              {webhooks?.map((wh) => (
-                <div
-                  key={wh.id}
-                  className="group flex items-center gap-3 px-4 py-3 hover:bg-muted/40 cursor-pointer transition-colors"
-                  onClick={() => setSelectedId(wh.id)}
-                >
-                  <MethodBadge method={wh.method} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{wh.endpointName}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {wh.clientName} · {wh.sourceIp}
-                    </p>
+            {isLoading && (
+              <div className="divide-y">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 p-4">
+                    <Skeleton className="h-4 w-4" />
+                    <Skeleton className="h-5 w-14" />
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="h-4 w-24 ml-auto" />
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs text-muted-foreground">
-                      {formatDistanceToNow(new Date(wh.receivedAt), { addSuffix: true })}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{(wh.sizeBytes / 1024).toFixed(1)} KB</p>
+                ))}
+              </div>
+            )}
+
+            {!isLoading && webhooks?.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-10">
+                No webhooks received yet. Send a POST to <code>/hook/:token</code>
+              </p>
+            )}
+
+            {!isLoading && groups.map((group) => {
+              const groupIds = group.items.map((w) => w.id)
+              const allChecked = groupIds.every((id) => checkedIds.has(id))
+              const someChecked = groupIds.some((id) => checkedIds.has(id))
+              const isCollapsed = collapsedGroups.has(group.endpointId)
+
+              return (
+                <div key={group.endpointId} className="border-b last:border-b-0">
+                  {/* group header */}
+                  <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/30 border-b select-none">
+                    <Checkbox
+                      checked={allChecked ? true : someChecked ? 'indeterminate' : false}
+                      onCheckedChange={(v) => toggleGroup(group.endpointId, groupIds, !!v)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="shrink-0"
+                    />
+                    <button
+                      className="flex items-center gap-1.5 text-sm font-medium hover:text-foreground/80 transition-colors min-w-0"
+                      onClick={() => toggleCollapse(group.endpointId)}
+                    >
+                      {isCollapsed
+                        ? <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        : <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      }
+                      <span className="truncate">{group.endpointName}</span>
+                      <span className="text-muted-foreground font-normal truncate">· {group.clientName}</span>
+                    </button>
+                    <span className="ml-auto text-xs text-muted-foreground shrink-0">
+                      {group.items.length} webhook{group.items.length !== 1 ? 's' : ''}
+                    </span>
                   </div>
 
-                  {/* Quick replay button */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          quickReplayMutation.mutate(wh.id)
-                        }}
-                        disabled={replayingId === wh.id}
-                      >
-                        {replayingId === wh.id
-                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          : <RefreshCw className="h-3.5 w-3.5" />
-                        }
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      <p>Replay to WS clients</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  {/* rows */}
+                  {!isCollapsed && (
+                    <table className="w-full text-sm">
+                      <tbody className="divide-y">
+                        {group.items.map((wh) => (
+                          <tr
+                            key={wh.id}
+                            className="group hover:bg-muted/40 cursor-pointer transition-colors"
+                            onClick={() => openDetail(wh.id)}
+                          >
+                            {/* checkbox */}
+                            <td className="pl-4 pr-2 py-3 w-8" onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                checked={checkedIds.has(wh.id)}
+                                onCheckedChange={(v) => toggleCheck(wh.id, !!v)}
+                              />
+                            </td>
 
-                  <Eye className="h-4 w-4 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            {/* method */}
+                            <td className="pr-3 py-3 w-20">
+                              <MethodBadge method={wh.method} />
+                            </td>
+
+                            {/* source IP */}
+                            <td className="pr-3 py-3 w-36 font-mono text-xs text-muted-foreground">
+                              {wh.sourceIp}
+                            </td>
+
+                            {/* note indicator */}
+                            <td className="pr-3 py-3 w-8">
+                              {wh.note && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <StickyNote className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="max-w-xs text-xs">
+                                    {wh.note}
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                            </td>
+
+                            {/* size + time */}
+                            <td className="py-3 pl-2 text-right pr-3 w-32">
+                              <p className="text-xs text-muted-foreground">
+                                {formatDistanceToNow(new Date(wh.receivedAt), { addSuffix: true })}
+                              </p>
+                              <p className="text-xs text-muted-foreground">{(wh.sizeBytes / 1024).toFixed(1)} KB</p>
+                            </td>
+
+                            {/* actions */}
+                            <td className="py-3 pr-3 w-20 text-right" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost" size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                                      onClick={(e) => { e.stopPropagation(); quickReplayMutation.mutate(wh.id) }}
+                                      disabled={replayingId === wh.id}
+                                    >
+                                      {replayingId === wh.id
+                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        : <RefreshCw className="h-3.5 w-3.5" />}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top"><p>Replay to WS clients</p></TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="ghost" size="icon"
+                                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                      onClick={(e) => confirmDeleteSingle(wh.id, e)}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top"><p>Delete</p></TooltipContent>
+                                </Tooltip>
+
+                                <Eye className="h-4 w-4 text-muted-foreground shrink-0" />
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-              ))}
-            </div>
+              )
+            })}
           </CardContent>
         </Card>
 
-        {/* Detail dialog */}
+        {/* ── detail dialog ─────────────────────────────────── */}
         <Dialog open={!!selectedId} onOpenChange={(o) => !o && setSelectedId(null)}>
           <DialogContent className="w-[80vw] max-w-[80vw] sm:w-[80vw] sm:max-w-[80vw] max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {detail && <MethodBadge method={detail.method} />}
                 <span className="truncate">{detail?.endpointName}</span>
+                {detail?.note && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <StickyNote className="h-4 w-4 text-amber-500 shrink-0" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-xs text-xs">{detail.note}</TooltipContent>
+                  </Tooltip>
+                )}
               </DialogTitle>
             </DialogHeader>
 
@@ -351,9 +573,13 @@ export default function Webhooks() {
               </div>
             ) : detail && (
               <Tabs defaultValue="body" className="flex-1 flex flex-col min-h-0">
-                <TabsList className="shrink-0">
+                <TabsList className="shrink-0 flex-wrap">
                   <TabsTrigger value="body">Body</TabsTrigger>
                   <TabsTrigger value="headers">Headers</TabsTrigger>
+                  <TabsTrigger value="note">
+                    <StickyNote className="h-3.5 w-3.5 mr-1" />
+                    Note {detail.note && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-amber-500 inline-block" />}
+                  </TabsTrigger>
                   <TabsTrigger value="curl">
                     <Terminal className="h-3.5 w-3.5 mr-1" />curl
                   </TabsTrigger>
@@ -366,6 +592,7 @@ export default function Webhooks() {
                   <TabsTrigger value="history">History ({replays?.length ?? 0})</TabsTrigger>
                 </TabsList>
 
+                {/* body */}
                 <TabsContent value="body" className="flex-1 min-h-0">
                   <ScrollArea className="h-64 w-full border rounded-md bg-muted/30">
                     {body ? (
@@ -382,6 +609,7 @@ export default function Webhooks() {
                   </div>
                 </TabsContent>
 
+                {/* headers */}
                 <TabsContent value="headers" className="flex-1 min-h-0">
                   <ScrollArea className="h-64 w-full border rounded-md">
                     <table className="w-full text-xs">
@@ -403,7 +631,52 @@ export default function Webhooks() {
                   </ScrollArea>
                 </TabsContent>
 
-                {/* ── curl tab ─────────────────────────────── */}
+                {/* note tab */}
+                <TabsContent value="note" className="space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Note personnelle</Label>
+                    <Textarea
+                      key={selectedId}
+                      defaultValue={currentNote}
+                      onChange={(e) => setNoteValue(e.target.value)}
+                      placeholder="Ajouter une note à ce webhook…"
+                      className="min-h-[120px] text-sm font-mono resize-none"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => noteMutation.mutate({ id: detail.id, note: noteValue !== '' ? noteValue : currentNote })}
+                      disabled={noteMutation.isPending}
+                      className="gap-1.5"
+                    >
+                      {noteSaved
+                        ? <><Check className="h-3.5 w-3.5" /> Saved</>
+                        : noteMutation.isPending
+                          ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+                          : <><StickyNote className="h-3.5 w-3.5" /> Save note</>
+                      }
+                    </Button>
+                    {currentNote && (
+                      <Button
+                        size="sm" variant="ghost"
+                        className="text-destructive hover:text-destructive gap-1.5"
+                        onClick={() => {
+                          setNoteValue('')
+                          noteMutation.mutate({ id: detail.id, note: '' })
+                        }}
+                        disabled={noteMutation.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Supprimer la note
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    La note est stockée côté serveur et visible dans la liste.
+                  </p>
+                </TabsContent>
+
+                {/* curl */}
                 <TabsContent value="curl" className="space-y-3">
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Target URL</Label>
@@ -414,10 +687,7 @@ export default function Webhooks() {
                         placeholder="http://localhost:3000/webhook"
                         className="font-mono text-xs"
                       />
-                      <CopyButton
-                        text={detail ? buildCurl(detail, parsedHeaders, body, curlTarget) : ''}
-                        label="Copy curl"
-                      />
+                      <CopyButton text={detail ? buildCurl(detail, parsedHeaders, body, curlTarget) : ''} label="Copy curl" />
                     </div>
                   </div>
                   <ScrollArea className="h-56 w-full border rounded-md bg-muted/30">
@@ -430,7 +700,7 @@ export default function Webhooks() {
                   </p>
                 </TabsContent>
 
-                {/* ── deliveries tab ───────────────────────── */}
+                {/* deliveries */}
                 <TabsContent value="deliveries" className="flex-1 min-h-0 space-y-2">
                   <div className="flex gap-2 items-center">
                     <Label className="text-xs text-muted-foreground shrink-0">Target URL</Label>
@@ -452,9 +722,7 @@ export default function Webhooks() {
                         <div key={d.id} className="border rounded-md p-3 text-sm space-y-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             <HttpStatusBadge code={d.statusCode} />
-                            {d.durationMs !== null && (
-                              <span className="text-xs text-muted-foreground">{d.durationMs}ms</span>
-                            )}
+                            {d.durationMs !== null && <span className="text-xs text-muted-foreground">{d.durationMs}ms</span>}
                             {d.sessionIp && (
                               <span className="text-xs font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                                 {d.sessionIp}
@@ -463,14 +731,9 @@ export default function Webhooks() {
                             <span className="text-xs text-muted-foreground ml-auto">
                               {formatDistanceToNow(new Date(d.forwardedAt), { addSuffix: true })}
                             </span>
-                            <CopyButton
-                              text={detail ? buildCurl(detail, parsedHeaders, body, curlTarget) : ''}
-                              label="curl"
-                            />
+                            <CopyButton text={detail ? buildCurl(detail, parsedHeaders, body, curlTarget) : ''} label="curl" />
                           </div>
-                          {d.errorMsg && (
-                            <p className="text-xs text-destructive font-mono break-all">{d.errorMsg}</p>
-                          )}
+                          {d.errorMsg && <p className="text-xs text-destructive font-mono break-all">{d.errorMsg}</p>}
                           {d.responseBody && (
                             <details className="group">
                               <summary className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground">
@@ -504,14 +767,13 @@ export default function Webhooks() {
                   </ScrollArea>
                 </TabsContent>
 
+                {/* replay */}
                 <TabsContent value="replay" className="space-y-4">
                   <div className="space-y-3">
                     <div className="space-y-1">
                       <Label>Target</Label>
                       <Select value={replayTarget} onValueChange={(v: string) => setReplayTarget(v as 'ws' | 'url')}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="ws">WebSocket clients (live)</SelectItem>
                           <SelectItem value="url">External URL</SelectItem>
@@ -535,12 +797,12 @@ export default function Webhooks() {
                     >
                       {replayMutation.isPending
                         ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Replaying…</>
-                        : <><RefreshCw className="mr-2 h-4 w-4" /> Replay</>
-                      }
+                        : <><RefreshCw className="mr-2 h-4 w-4" /> Replay</>}
                     </Button>
                   </div>
                 </TabsContent>
 
+                {/* history */}
                 <TabsContent value="history" className="flex-1 min-h-0">
                   <ScrollArea className="h-64">
                     <div className="space-y-2">
@@ -568,6 +830,53 @@ export default function Webhooks() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* ── delete confirm dialogs ─────────────────────────── */}
+        <AlertDialog open={confirmDelete === 'single'} onOpenChange={(o) => !o && setConfirmDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Supprimer ce webhook ?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Cette action est irréversible.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Annuler</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  if (deleteSingleId) deleteMutation.mutate(deleteSingleId)
+                  setConfirmDelete(null)
+                }}
+              >
+                Supprimer
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={confirmDelete === 'bulk'} onOpenChange={(o) => !o && setConfirmDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Supprimer {checkedCount} webhook{checkedCount !== 1 ? 's' : ''} ?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Cette action est irréversible.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Annuler</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  bulkDeleteMutation.mutate(Array.from(checkedIds))
+                  setConfirmDelete(null)
+                }}
+              >
+                Supprimer
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </TooltipProvider>
   )

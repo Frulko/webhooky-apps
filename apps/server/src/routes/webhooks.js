@@ -52,4 +52,60 @@ export default async function webhookRoutes(fastify) {
     if (!webhook) return reply.code(404).send({ error: 'Webhook not found' })
     return webhook
   })
+
+  // PATCH /webhooks/:id — update note
+  fastify.patch('/webhooks/:id', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const { id } = request.params
+    const userId = request.user.sub
+    const { note } = request.body ?? {}
+
+    const [webhook] = await fastify.sql`
+      UPDATE webhooks w
+      SET note = ${note ?? null}
+      FROM endpoints e
+      JOIN clients c ON c.id = e.client_id
+      WHERE w.id = ${id} AND w.endpoint_id = e.id AND c.user_id = ${userId}
+      RETURNING w.id, w.note
+    `
+    if (!webhook) return reply.code(404).send({ error: 'Webhook not found' })
+    return webhook
+  })
+
+  // DELETE /webhooks/:id — delete single webhook
+  fastify.delete('/webhooks/:id', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const { id } = request.params
+    const userId = request.user.sub
+
+    const [deleted] = await fastify.sql`
+      DELETE FROM webhooks w
+      USING endpoints e
+      JOIN clients c ON c.id = e.client_id
+      WHERE w.id = ${id} AND w.endpoint_id = e.id AND c.user_id = ${userId}
+      RETURNING w.id
+    `
+    if (!deleted) return reply.code(404).send({ error: 'Webhook not found' })
+    return { deleted: true }
+  })
+
+  // POST /webhooks/bulk-delete — delete multiple webhooks by IDs
+  fastify.post('/webhooks/bulk-delete', { preHandler: [fastify.authenticate] }, async (request, reply) => {
+    const userId = request.user.sub
+    const { ids } = request.body ?? {}
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return reply.code(400).send({ error: 'ids must be a non-empty array' })
+    }
+    if (ids.length > 200) {
+      return reply.code(400).send({ error: 'Cannot delete more than 200 at once' })
+    }
+
+    const deleted = await fastify.sql`
+      DELETE FROM webhooks w
+      USING endpoints e
+      JOIN clients c ON c.id = e.client_id
+      WHERE w.id = ANY(${ids}::uuid[]) AND w.endpoint_id = e.id AND c.user_id = ${userId}
+      RETURNING w.id
+    `
+    return { deleted: deleted.length }
+  })
 }
