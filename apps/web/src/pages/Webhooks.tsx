@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -42,6 +42,7 @@ import {
 import {
   RefreshCw, Eye, Loader2, Copy, Check, Terminal,
   Trash2, StickyNote, ChevronRight, ChevronDown,
+  Play, Square, ListRestart,
 } from 'lucide-react'
 import api from '@/lib/api'
 import { formatDistanceToNow, format } from 'date-fns'
@@ -200,6 +201,16 @@ export default function Webhooks() {
 
   // collapsed endpoint groups
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
+  // bulk replay
+  const [bulkReplayOpen, setBulkReplayOpen] = useState(false)
+  const [bulkReplayTarget, setBulkReplayTarget] = useState<'ws' | 'url'>('ws')
+  const [bulkReplayUrl, setBulkReplayUrl] = useState('')
+  const [bulkReplayDelay, setBulkReplayDelay] = useState(500)
+  const [bulkReplayProgress, setBulkReplayProgress] = useState<{
+    current: number; total: number; running: boolean; succeeded: number; failed: number
+  } | null>(null)
+  const cancelRef = useRef(false)
 
   // note editing state (local to dialog)
   const [noteValue, setNoteValue] = useState('')
@@ -362,6 +373,50 @@ export default function Webhooks() {
     setConfirmDelete('single')
   }
 
+  async function startBulkReplay() {
+    if (!webhooks) return
+    const selected = webhooks
+      .filter((w) => checkedIds.has(w.id))
+      .sort((a, b) => new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime())
+
+    cancelRef.current = false
+    setBulkReplayProgress({ current: 0, total: selected.length, running: true, succeeded: 0, failed: 0 })
+
+    let succeeded = 0
+    let failed = 0
+
+    for (let i = 0; i < selected.length; i++) {
+      if (cancelRef.current) break
+      try {
+        const res = await api.post(`/webhooks/${selected[i].id}/replay`, {
+          target: bulkReplayTarget,
+          url: bulkReplayTarget === 'url' ? bulkReplayUrl : undefined,
+        })
+        if (res.data.status === 'success') succeeded++
+        else failed++
+      } catch {
+        failed++
+      }
+
+      const isLast = i === selected.length - 1
+      setBulkReplayProgress({
+        current: i + 1, total: selected.length,
+        running: !isLast && !cancelRef.current,
+        succeeded, failed,
+      })
+
+      if (!isLast && !cancelRef.current && bulkReplayDelay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, bulkReplayDelay))
+      }
+    }
+
+    if (cancelRef.current) {
+      toast.info(`Replay annulé — ${succeeded} envoyé(s)`)
+    } else {
+      toast.success(`Bulk replay terminé — ${succeeded} ok${failed > 0 ? `, ${failed} échec(s)` : ''}`)
+    }
+  }
+
   const parsedHeaders = detail
     ? typeof detail.headers === 'string' ? JSON.parse(detail.headers) : (detail.headers ?? {})
     : {}
@@ -385,16 +440,27 @@ export default function Webhooks() {
             <p className="text-muted-foreground text-sm">Received webhooks history — grouped by endpoint</p>
           </div>
           {checkedCount > 0 && (
-            <Button
-              variant="destructive"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => setConfirmDelete('bulk')}
-              disabled={bulkDeleteMutation.isPending}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete selected ({checkedCount})
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setBulkReplayOpen(true)}
+              >
+                <ListRestart className="h-3.5 w-3.5" />
+                Replay selected ({checkedCount})
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setConfirmDelete('bulk')}
+                disabled={bulkDeleteMutation.isPending}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete selected ({checkedCount})
+              </Button>
+            </div>
           )}
         </div>
 
@@ -828,6 +894,137 @@ export default function Webhooks() {
                 </TabsContent>
               </Tabs>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* ── bulk replay dialog ────────────────────────────── */}
+        <Dialog open={bulkReplayOpen} onOpenChange={(o) => {
+          if (!o && bulkReplayProgress?.running) {
+            cancelRef.current = true
+          }
+          if (!o) setBulkReplayProgress(null)
+          setBulkReplayOpen(o)
+        }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ListRestart className="h-4 w-4" />
+                Replay {checkedCount} webhook{checkedCount !== 1 ? 's' : ''}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Les webhooks seront rejoués dans l'ordre d'arrivée (du plus ancien au plus récent).
+              </p>
+
+              <div className="space-y-1">
+                <Label>Cible</Label>
+                <Select
+                  value={bulkReplayTarget}
+                  onValueChange={(v) => setBulkReplayTarget(v as 'ws' | 'url')}
+                  disabled={bulkReplayProgress?.running}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ws">WebSocket clients (live)</SelectItem>
+                    <SelectItem value="url">URL externe</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {bulkReplayTarget === 'url' && (
+                <div className="space-y-1">
+                  <Label>URL</Label>
+                  <Input
+                    placeholder="https://example.com/webhook"
+                    value={bulkReplayUrl}
+                    onChange={(e) => setBulkReplayUrl(e.target.value)}
+                    disabled={bulkReplayProgress?.running}
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <Label className="flex items-center justify-between">
+                  <span>Délai entre chaque replay</span>
+                  <span className="text-muted-foreground font-normal tabular-nums">
+                    {bulkReplayDelay >= 1000
+                      ? `${(bulkReplayDelay / 1000).toFixed(bulkReplayDelay % 1000 === 0 ? 0 : 1)} s`
+                      : `${bulkReplayDelay} ms`}
+                  </span>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0} max={5000} step={100}
+                    value={bulkReplayDelay}
+                    onChange={(e) => setBulkReplayDelay(Number(e.target.value))}
+                    disabled={bulkReplayProgress?.running}
+                    className="flex-1 accent-primary"
+                  />
+                  <Input
+                    type="number"
+                    min={0} max={30000} step={100}
+                    value={bulkReplayDelay}
+                    onChange={(e) => setBulkReplayDelay(Math.max(0, Number(e.target.value)))}
+                    disabled={bulkReplayProgress?.running}
+                    className="w-24 font-mono text-xs text-right"
+                  />
+                  <span className="text-xs text-muted-foreground shrink-0">ms</span>
+                </div>
+              </div>
+
+              {/* progress */}
+              {bulkReplayProgress && (
+                <div className="space-y-2 rounded-md border p-3 bg-muted/30">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium">
+                      {bulkReplayProgress.running
+                        ? `Envoi ${bulkReplayProgress.current} / ${bulkReplayProgress.total}…`
+                        : `Terminé — ${bulkReplayProgress.current} / ${bulkReplayProgress.total}`}
+                    </span>
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      {bulkReplayProgress.succeeded > 0 && (
+                        <span className="text-green-600">✓ {bulkReplayProgress.succeeded}</span>
+                      )}
+                      {bulkReplayProgress.failed > 0 && (
+                        <span className="text-destructive">✗ {bulkReplayProgress.failed}</span>
+                      )}
+                    </div>
+                  </div>
+                  {/* progress bar */}
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all duration-300"
+                      style={{ width: `${(bulkReplayProgress.current / bulkReplayProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                {!bulkReplayProgress?.running ? (
+                  <Button
+                    className="flex-1 gap-1.5"
+                    onClick={startBulkReplay}
+                    disabled={bulkReplayTarget === 'url' && !bulkReplayUrl}
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    Lancer le replay
+                  </Button>
+                ) : (
+                  <Button
+                    variant="destructive"
+                    className="flex-1 gap-1.5"
+                    onClick={() => { cancelRef.current = true }}
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                    Annuler
+                  </Button>
+                )}
+              </div>
+            </div>
           </DialogContent>
         </Dialog>
 
