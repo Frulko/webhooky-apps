@@ -83,4 +83,10 @@ jobs:
         if: env.PORTAINER_WEBHOOK_URL != ''
         env:
           PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
-        run: curl -fsSL -X POST "$(echo "$PORTAINER_WEBHOOK_URL" | tr -d '[:space:]')"
+          PORTAINER_WEBHOOK_SECRET: ${{ secrets.PORTAINER_WEBHOOK_SECRET }}
+        run: |
+          ARGS=(-fsSL -X POST "$(echo "$PORTAINER_WEBHOOK_URL" | tr -d '[:space:]')")
+          if [ -n "$PORTAINER_WEBHOOK_SECRET" ]; then
+            ARGS+=(-H "x-webhook-secret: $PORTAINER_WEBHOOK_SECRET")
+          fi
+          curl "${ARGS[@]}"
