@@ -41,7 +41,8 @@
       "Bash(git stash:*)",
       "Bash(npx tsc:*)",
       "Bash(npx --yes vite build)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(make release-patch:*)"
     ]
   }
 }
